@@ -107,7 +107,7 @@ const App: React.FC = () => {
     isDestructive?: boolean;
   } | null>(null);
 
-  const currentLang = currentUser ? currentUser.settings.language : globalState.globalSettings.language;
+  const currentLang = currentUser?.settings?.language || globalState?.globalSettings?.language || 'en';
   const t = translations[currentLang];
   const isRTL = currentLang === 'ar';
 
