@@ -2,21 +2,34 @@
 import { FinanceState } from '../types';
 import { offlineStorage } from '../src/services/offlineStorage';
 import { syncService } from '../src/services/syncService';
+import { supabase } from '../src/services/supabaseClient';
+import { authService } from '../src/services/authService';
 
 const STORAGE_KEY = 'finance_flow_data';
 
 export const storageService = {
   save: async (data: FinanceState) => {
     try {
-      // Save to localStorage as backup
+      // Always save to local storage as backup
       localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-
-      // Save to IndexedDB for better performance and offline support
       await offlineStorage.cacheData('financeState', data, 'app-state');
 
-      // If online, sync with server
-      if (syncService.isDeviceOnline()) {
-        await syncService.storePendingOperation('SYNC_STATE', data);
+      // Check if user is authenticated
+      const { data: { user } } = await authService.getCurrentUser();
+
+      if (user && syncService.isDeviceOnline()) {
+        // Sync accounts and transactions to Supabase
+        console.log('[StorageService] Syncing data to Supabase for user:', user.id);
+
+        // Sync accounts
+        for (const account of data.accounts) {
+          await syncService.storePendingOperation('CREATE_ACCOUNT', { ...account, user_id: user.id });
+        }
+
+        // Sync transactions
+        for (const transaction of data.transactions) {
+          await syncService.storePendingOperation('CREATE_TRANSACTION', { ...transaction, user_id: user.id });
+        }
       }
 
       console.log('[StorageService] Data saved successfully');
@@ -29,15 +42,48 @@ export const storageService = {
 
   load: async (): Promise<FinanceState | null> => {
     try {
-      // Try to load from IndexedDB first (faster)
+      // Check if user is authenticated
+      const { data: { user } } = await authService.getCurrentUser();
+
+      if (user) {
+        // Load from Supabase for authenticated users
+        console.log('[StorageService] Loading data from Supabase for user:', user.id);
+
+        const [accountsRes, transactionsRes] = await Promise.all([
+          supabase.from('accounts').select('*').eq('user_id', user.id),
+          supabase.from('transactions').select('*').eq('user_id', user.id)
+        ]);
+
+        if (accountsRes.error || transactionsRes.error) {
+          console.error('[StorageService] Failed to load from Supabase:', accountsRes.error || transactionsRes.error);
+          // Fallback to local storage
+        } else {
+          const cloudData: FinanceState = {
+            users: [], // Will be loaded separately
+            accounts: accountsRes.data || [],
+            transactions: transactionsRes.data || [],
+            payables: [],
+            receivables: [],
+            budgets: [],
+            goals: [],
+            categories: [],
+            globalSettings: {},
+            notifications: []
+          };
+
+          // Cache in IndexedDB for offline use
+          await offlineStorage.cacheData('financeState', cloudData, 'app-state');
+          return cloudData;
+        }
+      }
+
+      // For non-authenticated users or fallback, load from IndexedDB/localStorage
       let data = await offlineStorage.getCachedData('financeState');
 
       if (!data) {
-        // Fallback to localStorage
         const localData = localStorage.getItem(STORAGE_KEY);
         data = localData ? JSON.parse(localData) : null;
 
-        // Cache in IndexedDB for future use
         if (data) {
           await offlineStorage.cacheData('financeState', data, 'app-state');
         }
@@ -46,19 +92,46 @@ export const storageService = {
       return data;
     } catch (error) {
       console.error('[StorageService] Failed to load data:', error);
-      // Fallback to localStorage
       const data = localStorage.getItem(STORAGE_KEY);
       return data ? JSON.parse(data) : null;
     }
   },
 
-  clear: async () => {
+  loadUserData: async (userId: string): Promise<FinanceState | null> => {
     try {
-      localStorage.removeItem(STORAGE_KEY);
-      await offlineStorage.clearAllData();
-      console.log('[StorageService] All data cleared');
+      console.log('[StorageService] Loading user data from Supabase for user:', userId);
+
+      const [userRes, accountsRes, transactionsRes] = await Promise.all([
+        supabase.from('users').select('*').eq('id', userId).single(),
+        supabase.from('accounts').select('*').eq('user_id', userId),
+        supabase.from('transactions').select('*').eq('user_id', userId)
+      ]);
+
+      if (userRes.error || accountsRes.error || transactionsRes.error) {
+        console.error('[StorageService] Failed to load user data:', userRes.error || accountsRes.error || transactionsRes.error);
+        return null;
+      }
+
+      const userData: FinanceState = {
+        users: [userRes.data],
+        accounts: accountsRes.data || [],
+        transactions: transactionsRes.data || [],
+        payables: [],
+        receivables: [],
+        budgets: [],
+        goals: [],
+        categories: [],
+        globalSettings: {},
+        notifications: []
+      };
+
+      // Cache locally for offline use
+      await offlineStorage.cacheData('financeState', userData, 'app-state');
+
+      return userData;
     } catch (error) {
-      console.error('[StorageService] Failed to clear data:', error);
+      console.error('[StorageService] Failed to load user data:', error);
+      return null;
     }
   },
 

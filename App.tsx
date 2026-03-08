@@ -26,7 +26,7 @@ import Goals from './components/Goals';
 import AIInsights from './components/AIInsights';
 import SettingsView from './components/SettingsView';
 import UserManagement from './components/UserManagement';
-import Login from './components/Login';
+import Login from './components/LoginSaaS';
 import { Menu, X, Plus, Sparkles, LogOut, ShieldCheck, CheckCircle, AlertCircle, Info, AlertTriangle, Languages, Globe, Wifi, WifiOff } from 'lucide-react';
 import { translations } from './translations';
 
@@ -201,15 +201,30 @@ const App: React.FC = () => {
     });
   };
 
-  const handleLogin = (user: User) => {
+  const handleLogin = async (user: User) => {
     setCurrentUser(user);
-    setGlobalState(prev => {
-      const userHasCats = prev.categories.some(c => c.userId === user.id);
-      if (!userHasCats) {
-        return { ...prev, categories: [...prev.categories, ...createDefaultCategories(user.id)] };
+
+    // Load user data from Supabase if authenticated
+    if (user.id && user.id !== 'admin-1') { // Skip for demo admin
+      const userData = await storageService.loadUserData(user.id);
+      if (userData) {
+        setGlobalState(prev => ({
+          ...prev,
+          accounts: [...prev.accounts, ...userData.accounts],
+          transactions: [...prev.transactions, ...userData.transactions],
+          users: [...prev.users.filter(u => u.id !== user.id), user] // Update user data
+        }));
       }
-      return prev;
-    });
+    } else {
+      // For demo admin, ensure categories exist
+      setGlobalState(prev => {
+        const userHasCats = prev.categories.some(c => c.userId === user.id);
+        if (!userHasCats) {
+          return { ...prev, categories: [...prev.categories, ...createDefaultCategories(user.id)] };
+        }
+        return prev;
+      });
+    }
 
     if (user.role === 'ADMIN') {
       setActiveTab('user-management');

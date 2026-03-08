@@ -1,5 +1,6 @@
 // Data Synchronization Service for Maestro PWA
 import { offlineStorage } from './offlineStorage';
+import { supabase } from './supabaseClient';
 
 export class SyncService {
   private isOnline: boolean = navigator.onLine;
@@ -138,51 +139,46 @@ export class SyncService {
     }
   }
 
-  // API sync methods (these would call your actual API endpoints)
+  // API sync methods using Supabase
   private async syncCreateUser(data: any): Promise<void> {
-    // Replace with actual API call
-    const response = await fetch('/api/users', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data)
-    });
+    const { error } = await supabase
+      .from('users')
+      .insert(data);
 
-    if (!response.ok) {
-      throw new Error(`Failed to create user: ${response.statusText}`);
+    if (error) {
+      throw new Error(`Failed to create user: ${error.message}`);
     }
   }
 
   private async syncUpdateUser(data: any): Promise<void> {
-    const response = await fetch(`/api/users/${data.id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data)
-    });
+    const { error } = await supabase
+      .from('users')
+      .update(data)
+      .eq('id', data.id);
 
-    if (!response.ok) {
-      throw new Error(`Failed to update user: ${response.statusText}`);
+    if (error) {
+      throw new Error(`Failed to update user: ${error.message}`);
     }
   }
 
   private async syncDeleteUser(data: any): Promise<void> {
-    const response = await fetch(`/api/users/${data.id}`, {
-      method: 'DELETE'
-    });
+    const { error } = await supabase
+      .from('users')
+      .delete()
+      .eq('id', data.id);
 
-    if (!response.ok) {
-      throw new Error(`Failed to delete user: ${response.statusText}`);
+    if (error) {
+      throw new Error(`Failed to delete user: ${error.message}`);
     }
   }
 
   private async syncCreateTransaction(data: any): Promise<void> {
-    const response = await fetch('/api/transactions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data)
-    });
+    const { error } = await supabase
+      .from('transactions')
+      .insert(data);
 
-    if (!response.ok) {
-      throw new Error(`Failed to create transaction: ${response.statusText}`);
+    if (error) {
+      throw new Error(`Failed to create transaction: ${error.message}`);
     }
   }
 

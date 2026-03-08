@@ -1,8 +1,10 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { User, FinanceState } from '../types';
 import { translations } from '../translations';
 import { Mail, User as UserIcon, Lock, ArrowRight, ShieldCheck, Key, RefreshCw, Globe, Check } from 'lucide-react';
+import { authService } from '../src/services/authService';
+import { supabase } from '../src/services/supabaseClient';
 
 interface LoginProps {
   state: FinanceState & { notify: (msg: string, type: any) => void };
@@ -18,36 +20,68 @@ const Login: React.FC<LoginProps> = ({ state, onLogin, updateState }) => {
 
   const [formData, setFormData] = useState({
     email: '',
-    username: '',
     password: ''
   });
-  const [rememberMe, setRememberMe] = useState(false);
+  const [isSignUp, setIsSignUp] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [isResetMode, setIsResetMode] = useState(false);
-  const [resetStep, setResetStep] = useState<'EMAIL' | 'OTP' | 'NEW_PASS'>('EMAIL');
-  const [otp, setOtp] = useState('');
-  const [generatedOtp, setGeneratedOtp] = useState('');
-  const [newPassword, setNewPassword] = useState('');
 
-  const handleLogin = (e: React.FormEvent) => {
+  useEffect(() => {
+    // Check if user is already logged in
+    const checkUser = async () => {
+      const { data: { user } } = await authService.getCurrentUser();
+      if (user) {
+        // Load user data from Supabase
+        const { data: userData } = await supabase
+          .from('users')
+          .select('*')
+          .eq('id', user.id)
+          .single();
+
+        if (userData) {
+          onLogin(userData);
+        }
+      }
+    };
+    checkUser();
+
+    // Listen to auth changes
+    const { data: { subscription } } = authService.onAuthStateChange(async (event, session) => {
+      if (event === 'SIGNED_IN' && session?.user) {
+        const { data: userData } = await supabase
+          .from('users')
+          .select('*')
+          .eq('id', session.user.id)
+          .single();
+
+        if (userData) {
+          onLogin(userData);
+        }
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, [onLogin]);
+
+  const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setLoading(true);
 
-    const user = state.users.find(u => 
-      u.email.toLowerCase() === formData.email.toLowerCase() &&
-      u.username === formData.username &&
-      u.password === formData.password
-    );
-
-    if (user) {
-      if (user.expirationDate && new Date(user.expirationDate) < new Date()) {
-        setError(t.auth.accountExpired);
-        return;
-      }
-      
-      if (rememberMe) {
-        localStorage.setItem('maestro_remembered_user_id', user.id);
+    try {
+      if (isSignUp) {
+        await authService.signUp(formData.email, formData.password);
+        setError('Check your email for confirmation link');
       } else {
+        await authService.signIn(formData.email, formData.password);
+        // onLogin will be called via auth state change
+      }
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
         localStorage.removeItem('maestro_remembered_user_id');
       }
       
