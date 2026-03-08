@@ -267,14 +267,14 @@ const App: React.FC = () => {
     if (!currentUser) return;
     updateGlobalState(prev => {
       const currentUserData = {
-        accounts: prev.accounts.filter(a => a.userId === currentUser.id),
-        transactions: prev.transactions.filter(t => t.userId === currentUser.id),
-        payables: prev.payables.filter(p => p.userId === currentUser.id),
-        receivables: prev.receivables.filter(r => r.userId === currentUser.id),
-        budgets: prev.budgets.filter(b => b.userId === currentUser.id),
-        goals: prev.goals.filter(g => g.userId === currentUser.id),
-        categories: prev.categories.filter(c => c.userId === currentUser.id),
-        settings: currentUser.settings
+        accounts: prev.accounts?.filter(a => a.userId === currentUser.id) || [],
+        transactions: prev.transactions?.filter(t => t.userId === currentUser.id) || [],
+        payables: prev.payables?.filter(p => p.userId === currentUser.id) || [],
+        receivables: prev.receivables?.filter(r => r.userId === currentUser.id) || [],
+        budgets: prev.budgets?.filter(b => b.userId === currentUser.id) || [],
+        goals: prev.goals?.filter(g => g.userId === currentUser.id) || [],
+        categories: prev.categories?.filter(c => c.userId === currentUser.id) || [],
+        settings: currentUser.settings || { language: 'en', currency: 'USD' }
       };
 
       const result = updater(currentUserData);
