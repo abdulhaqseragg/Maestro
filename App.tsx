@@ -88,6 +88,7 @@ const INITIAL_STATE: FinanceState = {
 };
 
 const App: React.FC = () => {
+  console.log('App component loaded');
   const [globalState, setGlobalState] = useState<FinanceState>(INITIAL_STATE);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [activeTab, setActiveTab] = useState('dashboard');
