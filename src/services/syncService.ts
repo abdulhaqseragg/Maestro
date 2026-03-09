@@ -71,7 +71,11 @@ export class SyncService {
 
     try {
       const pendingOperations = await offlineStorage.getPendingOperations();
-
+      if (!pendingOperations || !Array.isArray(pendingOperations)) {
+        console.warn('[SyncService] pendingOperations is null or not an array');
+        this.syncInProgress = false;
+        return;
+      }
       if (pendingOperations.length === 0) {
         console.log('[SyncService] No pending operations to sync');
         this.syncInProgress = false;

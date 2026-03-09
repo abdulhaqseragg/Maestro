@@ -85,7 +85,12 @@ class OfflineStorage {
       const request = store.getAll();
 
       request.onsuccess = () => {
-        resolve(request.result);
+        if (!request.result) {
+          console.warn('[OfflineStorage] getPendingOperations: result is null');
+          resolve([]);
+        } else {
+          resolve(request.result);
+        }
       };
 
       request.onerror = () => {
@@ -149,7 +154,7 @@ class OfflineStorage {
   async cacheData(key, data, type = 'general') {
     const cacheEntry = {
       key,
-      data,
+      data: JSON.parse(JSON.stringify(data)), // Deep clone to avoid DataCloneError
       type,
       lastModified: Date.now(),
       version: 1

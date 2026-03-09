@@ -26,6 +26,7 @@ import Goals from './components/Goals';
 import AIInsights from './components/AIInsights';
 import SettingsView from './components/SettingsView';
 import UserManagement from './components/UserManagement';
+import AdminUserManagement from './components/AdminUserManagement';
 import Login from './components/LoginSaaS';
 import { Menu, X, Plus, Sparkles, LogOut, ShieldCheck, CheckCircle, AlertCircle, Info, AlertTriangle, Languages, Globe, Wifi, WifiOff } from 'lucide-react';
 import { translations } from './translations';
@@ -124,8 +125,12 @@ const App: React.FC = () => {
   }, []);
 
   const scopedState = useMemo(() => {
-    if (!currentUser) return null;
-    return {
+    console.log('[App] Creating scopedState for user:', currentUser);
+    if (!currentUser) {
+      console.log('[App] No currentUser, returning null');
+      return null;
+    }
+    const state = {
       users: globalState.users,
       accounts: globalState.accounts.filter(a => a.userId === currentUser.id),
       transactions: globalState.transactions.filter(t => t.userId === currentUser.id),
@@ -139,6 +144,8 @@ const App: React.FC = () => {
       notify,
       requestConfirm
     };
+    console.log('[App] scopedState created:', state);
+    return state;
   }, [globalState, currentUser, notify, requestConfirm]);
 
   useEffect(() => {
@@ -203,6 +210,7 @@ const App: React.FC = () => {
   };
 
   const handleLogin = async (user: User) => {
+    console.log('[App] handleLogin called with user:', user);
     setCurrentUser(user);
 
     // Load user data from Supabase if authenticated
@@ -310,7 +318,11 @@ const App: React.FC = () => {
   }
 
   const renderContent = () => {
-    if (!scopedState) return null;
+    console.log('[App] renderContent called, scopedState:', scopedState);
+    if (!scopedState) {
+      console.log('[App] No scopedState, returning null');
+      return null;
+    }
     return (
       <div className="animate-soft">
         {(() => {
@@ -331,10 +343,9 @@ const App: React.FC = () => {
             case 'ai': return <AIInsights state={scopedState as any} />;
             case 'settings': return <SettingsView state={scopedState as any} updateState={updateScopedState} />;
             case 'user-management': return (
-              <UserManagement 
-                state={{ ...globalState, notify, requestConfirm } as any} 
+              <AdminUserManagement
+                state={{ ...globalState, notify } as any}
                 updateState={updateGlobalState}
-                currentLang={currentLang}
               />
             );
             default: return <Dashboard state={scopedState as any} setActiveTab={setActiveTab} />;

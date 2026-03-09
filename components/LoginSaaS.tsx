@@ -18,7 +18,6 @@ const Login: React.FC<LoginProps> = ({ state, onLogin, updateState }) => {
     email: '',
     password: ''
   });
-  const [isSignUp, setIsSignUp] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -27,15 +26,47 @@ const Login: React.FC<LoginProps> = ({ state, onLogin, updateState }) => {
     const checkUser = async () => {
       const { data: { user } } = await authService.getCurrentUser();
       if (user) {
+        console.log('[LoginSaaS] Found existing user:', user);
         // Load user data from Supabase
-        const { data: userData } = await supabase
+        let { data: userData, error } = await supabase
           .from('users')
           .select('*')
           .eq('id', user.id)
           .single();
 
+        if (error && error.code === 'PGRST116') { // User not found
+          console.log('[LoginSaaS] User not found in users table, creating...');
+          // Create user record if it doesn't exist
+          const { data: newUserData, error: insertError } = await supabase
+            .from('users')
+            .insert({
+              id: user.id,
+              email: user.email,
+              username: user.user_metadata?.username || user.email?.split('@')[0] || 'User',
+              role: 'USER' // Default role, can be changed later by admin
+            })
+            .select()
+            .single();
+
+          if (insertError) {
+            console.error('[LoginSaaS] Error creating user record:', insertError);
+            setError('Failed to create user profile');
+            return;
+          }
+
+          userData = newUserData;
+        } else if (error) {
+          console.error('[LoginSaaS] Error loading user data:', error);
+          setError('Failed to load user data');
+          return;
+        }
+
         if (userData) {
+          console.log('[LoginSaaS] User data loaded:', userData);
           onLogin(userData);
+        } else {
+          console.error('[LoginSaaS] No user data found');
+          setError('User data not found');
         }
       }
     };
@@ -43,15 +74,48 @@ const Login: React.FC<LoginProps> = ({ state, onLogin, updateState }) => {
 
     // Listen to auth changes
     const { data: { subscription } } = authService.onAuthStateChange(async (event, session) => {
+      console.log('[LoginSaaS] Auth state change:', event, session?.user?.id);
       if (event === 'SIGNED_IN' && session?.user) {
-        const { data: userData } = await supabase
+        // First, try to get user data from users table
+        let { data: userData, error } = await supabase
           .from('users')
           .select('*')
           .eq('id', session.user.id)
           .single();
 
+        if (error && error.code === 'PGRST116') { // User not found
+          console.log('[LoginSaaS] User not found in users table, creating...');
+          // Create user record if it doesn't exist
+          const { data: newUserData, error: insertError } = await supabase
+            .from('users')
+            .insert({
+              id: session.user.id,
+              email: session.user.email,
+              username: session.user.user_metadata?.username || session.user.email?.split('@')[0] || 'User',
+              role: 'USER' // Default role, can be changed later by admin
+            })
+            .select()
+            .single();
+
+          if (insertError) {
+            console.error('[LoginSaaS] Error creating user record:', insertError);
+            setError('Failed to create user profile');
+            return;
+          }
+
+          userData = newUserData;
+        } else if (error) {
+          console.error('[LoginSaaS] Error loading user data on sign in:', error);
+          setError('Failed to load user data');
+          return;
+        }
+
         if (userData) {
+          console.log('[LoginSaaS] User signed in, data loaded:', userData);
           onLogin(userData);
+        } else {
+          console.error('[LoginSaaS] No user data found on sign in');
+          setError('User data not found');
         }
       }
     });
@@ -65,13 +129,8 @@ const Login: React.FC<LoginProps> = ({ state, onLogin, updateState }) => {
     setLoading(true);
 
     try {
-      if (isSignUp) {
-        await authService.signUp(formData.email, formData.password);
-        setError('Check your email for confirmation link');
-      } else {
-        await authService.signIn(formData.email, formData.password);
-        // onLogin will be called via auth state change
-      }
+      await authService.signIn(formData.email, formData.password);
+      // onLogin will be called via auth state change
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -84,10 +143,10 @@ const Login: React.FC<LoginProps> = ({ state, onLogin, updateState }) => {
       <div className="bg-white rounded-3xl shadow-xl p-8 w-full max-w-md">
         <div className="text-center mb-8">
           <h2 className="text-3xl font-bold text-gray-900 mb-2">
-            {isSignUp ? 'Create Account' : 'Sign In'}
+            Sign In
           </h2>
           <p className="text-gray-600">
-            {isSignUp ? 'Join Maestro SaaS' : 'Welcome back to Maestro'}
+            Welcome back to Maestro
           </p>
         </div>
 
@@ -127,17 +186,14 @@ const Login: React.FC<LoginProps> = ({ state, onLogin, updateState }) => {
             disabled={loading}
             className="w-full bg-indigo-600 text-white py-3 rounded-lg font-medium hover:bg-indigo-700 disabled:opacity-50"
           >
-            {loading ? 'Loading...' : (isSignUp ? 'Sign Up' : 'Sign In')}
+            {loading ? 'Loading...' : 'Sign In'}
           </button>
         </form>
 
         <div className="mt-6 text-center">
-          <button
-            onClick={() => setIsSignUp(!isSignUp)}
-            className="text-indigo-600 hover:text-indigo-800 text-sm"
-          >
-            {isSignUp ? 'Already have an account? Sign In' : "Don't have an account? Sign Up"}
-          </button>
+          <p className="text-gray-500 text-sm">
+            Contact your administrator to create an account
+          </p>
         </div>
       </div>
     </div>
