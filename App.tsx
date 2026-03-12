@@ -169,6 +169,12 @@ const App: React.FC = () => {
           localStorage.removeItem('maestro_remembered_user_id');
         }
       }
+    } else {
+      // Auto-login as default admin user
+      const defaultUser = currentState.users.find(u => u.id === 'admin-1');
+      if (defaultUser) {
+        handleLogin(defaultUser);
+      }
     }
     
     setIsLoaded(true);
@@ -301,21 +307,6 @@ const App: React.FC = () => {
       };
     });
   };
-
-  if (!currentUser) {
-    return (
-      <Login 
-        state={{ ...globalState, notify, requestConfirm } as any} 
-        onLogin={handleLogin} 
-        updateState={(updater: any) => {
-           setGlobalState(prev => {
-             const result = updater(prev);
-             return { ...prev, globalSettings: result.settings ? { language: result.settings.language } : prev.globalSettings, users: result.users || prev.users };
-           });
-        }} 
-      />
-    );
-  }
 
   const renderContent = () => {
     console.log('[App] renderContent called, scopedState:', scopedState);
