@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { FinanceState, Budget, TransactionType } from '../types';
 import { Plus, X, ChartPie, Pencil, Trash2 } from 'lucide-react';
-import { financeLogic } from '../services/financeLogic';
+import { financeLogic } from '../src/services/financeLogic';
 import { translations } from '../translations';
 
 interface BudgetsProps {
@@ -118,8 +118,8 @@ const Budgets: React.FC<BudgetsProps> = ({ state, updateState }) => {
 
               <div className="space-y-2">
                 <div className="flex justify-between text-sm">
-                  <span className="text-slate-500">{t.common.spent}: {financeLogic.formatCurrency(budget.spent, state.settings.currency, lang)}</span>
-                  <span className="text-slate-900 font-bold">{t.common.limit}: {financeLogic.formatCurrency(budget.limit, state.settings.currency, lang)}</span>
+                  <span className="text-slate-500">{t.common.spent}: {financeLogic.formatCurrency(budget.spent, state.settings.currency, lang, state.settings.isPrivacyMode)}</span>
+                  <span className="text-slate-900 font-bold">{t.common.limit}: {financeLogic.formatCurrency(budget.limit, state.settings.currency, lang, state.settings.isPrivacyMode)}</span>
                 </div>
                 <div className="h-3 w-full bg-slate-100 rounded-full overflow-hidden">
                   <div 

@@ -5,10 +5,13 @@ import {
   Plus, X, Filter, Download, ArrowUpRight, 
   ArrowDownLeft, ArrowRightLeft, Search, 
   Printer, FileSpreadsheet, Calendar as CalendarIcon,
-  Pencil, Trash2
+  Pencil, Trash2, FileText
 } from 'lucide-react';
-import { financeLogic } from '../services/financeLogic';
+import { financeLogic } from '../src/services/financeLogic';
 import { translations } from '../translations';
+import { jsPDF } from 'jspdf';
+import autoTable from 'jspdf-autotable';
+import * as XLSX from 'xlsx';
 
 interface TransactionsProps {
   state: FinanceState & { notify: (msg: string, type: any) => void, requestConfirm: (t: string, m: string, c: () => void, d?: boolean) => void };
@@ -206,6 +209,55 @@ const Transactions: React.FC<TransactionsProps> = ({ state, updateState, openAdd
     state.notify(t.transactions.exportSuccess, 'SUCCESS');
   };
 
+  const handleExportExcel = () => {
+    const data = filteredTransactions.map(tr => ({
+      [t.common.date]: tr.date,
+      [t.common.type]: t.transactions.types[tr.type],
+      [t.common.account]: state.accounts.find(a => a.id === tr.accountId)?.name || '',
+      [t.common.category]: tr.category || t.transactions.noCategory,
+      [t.common.amount]: tr.amount,
+      [t.common.note]: tr.note || ''
+    }));
+
+    const worksheet = XLSX.utils.json_to_sheet(data);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Transactions");
+    XLSX.writeFile(workbook, `maestro_transactions_${new Date().toISOString().split('T')[0]}.xlsx`);
+    state.notify(t.transactions.exportSuccess, 'SUCCESS');
+  };
+
+  const handleExportPDF = () => {
+    const doc = new jsPDF();
+    const isArabic = lang === 'ar';
+    
+    // Simple header
+    doc.setFontSize(18);
+    doc.text(isArabic ? "Maestro Financial Report" : "Maestro Financial Report", 14, 22);
+    doc.setFontSize(11);
+    doc.setTextColor(100);
+    doc.text(`${t.common.date}: ${new Date().toLocaleDateString()}`, 14, 30);
+
+    const headers = [t.common.date, t.common.type, t.common.account, t.common.category, t.common.amount];
+    const data = filteredTransactions.map(tr => [
+      tr.date,
+      t.transactions.types[tr.type],
+      state.accounts.find(a => a.id === tr.accountId)?.name || '',
+      tr.category || '-',
+      `${tr.type === TransactionType.EXPENSE ? '-' : '+'}${tr.amount} ${state.settings.currency}`
+    ]);
+
+    autoTable(doc, {
+      head: [headers],
+      body: data,
+      startY: 40,
+      styles: { fontSize: 9 },
+      headStyles: { fillColor: [51, 65, 85] }
+    });
+
+    doc.save(`maestro_report_${new Date().toISOString().split('T')[0]}.pdf`);
+    state.notify(t.transactions.exportSuccess, 'SUCCESS');
+  };
+
   const openEditModal = (tr: Transaction) => {
     setEditingTransaction(tr);
     setFormData(tr);
@@ -259,9 +311,23 @@ const Transactions: React.FC<TransactionsProps> = ({ state, updateState, openAdd
           <button 
             onClick={handleExportCSV}
             className="flex items-center gap-2 px-4 py-2 border border-slate-200 bg-white text-slate-600 rounded-xl text-sm font-semibold hover:bg-slate-50 btn-interaction"
+            title="CSV"
           >
             <FileSpreadsheet size={18} />
-            {t.common.export}
+          </button>
+          <button 
+            onClick={handleExportExcel}
+            className="flex items-center gap-2 px-4 py-2 border border-slate-200 bg-white text-slate-600 rounded-xl text-sm font-semibold hover:bg-slate-50 btn-interaction"
+            title="Excel"
+          >
+            <Download size={18} />
+          </button>
+          <button 
+            onClick={handleExportPDF}
+            className="flex items-center gap-2 px-4 py-2 border border-slate-200 bg-white text-slate-600 rounded-xl text-sm font-semibold hover:bg-slate-50 btn-interaction"
+            title="PDF"
+          >
+            <FileText size={18} />
           </button>
           <button 
             onClick={() => {
@@ -381,7 +447,8 @@ const Transactions: React.FC<TransactionsProps> = ({ state, updateState, openAdd
           </div>
         </div>
         
-        <div className="overflow-x-auto print:overflow-visible">
+        {/* Desktop View Table */}
+        <div className="hidden md:block overflow-x-auto print:overflow-visible">
           <table className="w-full text-left print:text-black">
             <thead>
               <tr className={`bg-slate-50 text-slate-400 text-[10px] font-bold uppercase tracking-widest ${isRTL ? 'text-right' : 'text-left'} print:bg-white print:text-black print:border-b-2 print:border-slate-900`}>
@@ -434,7 +501,7 @@ const Transactions: React.FC<TransactionsProps> = ({ state, updateState, openAdd
                       tr.type === TransactionType.EXPENSE ? 'text-rose-500' : 'text-slate-900'
                     }`}>
                       {tr.type === TransactionType.INCOME ? '+' : tr.type === TransactionType.EXPENSE ? '-' : ''}
-                      {financeLogic.formatCurrency(tr.amount, state.settings.currency, lang)}
+                      {financeLogic.formatCurrency(tr.amount, state.settings.currency, lang, state.settings.isPrivacyMode)}
                     </td>
                     <td className="px-6 py-5 text-xs font-medium text-slate-400 truncate max-w-[150px] print:hidden">
                        {tr.note}
@@ -442,19 +509,66 @@ const Transactions: React.FC<TransactionsProps> = ({ state, updateState, openAdd
                   </tr>
                 );
               })}
-              {filteredTransactions.length === 0 && (
-                <tr>
-                  <td colSpan={8} className="px-6 py-20 text-center">
-                    <div className="text-slate-200 space-y-3 print:text-black">
-                      <ArrowRightLeft className="mx-auto print:hidden" size={48} />
-                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em] print:text-black">{t.common.noData}</p>
-                    </div>
-                  </td>
-                </tr>
-              )}
             </tbody>
           </table>
         </div>
+
+        {/* Mobile View Cards */}
+        <div className="md:hidden divide-y divide-slate-50">
+          {filteredTransactions.map(tr => {
+            const account = state.accounts.find(a => a.id === tr.accountId);
+            return (
+              <div 
+                key={tr.id} 
+                className="p-5 active:bg-slate-50 transition-colors flex items-center gap-4"
+                onClick={() => openEditModal(tr)}
+              >
+                <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 ${
+                  tr.type === TransactionType.INCOME ? 'bg-emerald-50 text-emerald-500' : 
+                  tr.type === TransactionType.EXPENSE ? 'bg-rose-50 text-rose-500' : 'bg-slate-100 text-slate-500'
+                }`}>
+                  {tr.type === TransactionType.INCOME ? <ArrowDownLeft size={22} /> : 
+                   tr.type === TransactionType.EXPENSE ? <ArrowUpRight size={22} /> : <ArrowRightLeft size={22} />}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between mb-1">
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest truncate">
+                      {tr.category || t.transactions.noCategory}
+                    </p>
+                    <p className={`text-sm font-black ${
+                      tr.type === TransactionType.INCOME ? 'text-emerald-600' : 
+                      tr.type === TransactionType.EXPENSE ? 'text-rose-600' : 'text-slate-900'
+                    }`}>
+                      {tr.type === TransactionType.INCOME ? '+' : tr.type === TransactionType.EXPENSE ? '-' : ''}
+                      {financeLogic.formatCurrency(tr.amount, state.settings.currency, lang, state.settings.isPrivacyMode)}
+                    </p>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: account?.color || '#cbd5e1' }} />
+                      <span className="text-[11px] font-bold text-slate-600 truncate">{account?.name}</span>
+                    </div>
+                    <span className="text-[10px] font-bold text-slate-400">
+                      {new Date(tr.date).toLocaleDateString(lang === 'ar' ? 'ar-EG' : 'en-US', { month: 'short', day: 'numeric' })}
+                    </span>
+                  </div>
+                  {tr.note && (
+                    <p className="text-[10px] font-medium text-slate-400 mt-1 truncate italic">"{tr.note}"</p>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {filteredTransactions.length === 0 && (
+          <div className="px-6 py-20 text-center">
+            <div className="text-slate-200 space-y-3 print:text-black">
+              <ArrowRightLeft className="mx-auto print:hidden" size={48} />
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em] print:text-black">{t.common.noData}</p>
+            </div>
+          </div>
+        )}
 
         <div className="hidden print:block p-8 text-center border-t border-slate-100">
            <p className="text-[8px] font-bold text-slate-300 uppercase tracking-[0.3em]">Generated by Maestro - Your Financial Orchestrator</p>
@@ -462,9 +576,9 @@ const Transactions: React.FC<TransactionsProps> = ({ state, updateState, openAdd
       </div>
 
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 print:hidden">
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 print:hidden">
           <div className="absolute inset-0 bg-slate-900/10 backdrop-blur-md animate-in fade-in duration-300" onClick={() => setIsModalOpen(false)} />
-          <div className="relative bg-white rounded-[2.5rem] shadow-2xl w-full max-w-lg overflow-hidden animate-soft">
+          <div className="relative bg-white rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl w-full max-w-lg overflow-hidden animate-in slide-in-from-bottom sm:slide-in-from-top-4 duration-500 sm:duration-300">
             <div className="px-8 py-6 border-b border-slate-50 flex items-center justify-between bg-slate-50/50">
               <h3 className="text-sm font-black text-slate-900 uppercase tracking-widest">
                 {editingTransaction ? t.common.edit : t.transactions.addNew}
@@ -484,7 +598,7 @@ const Transactions: React.FC<TransactionsProps> = ({ state, updateState, openAdd
                 </button>
               </div>
             </div>
-            <div className="p-8 space-y-6 max-h-[75vh] overflow-y-auto custom-scrollbar">
+            <div className="p-8 space-y-6 max-h-[85vh] sm:max-h-[75vh] overflow-y-auto custom-scrollbar">
               <div className="flex p-1 bg-slate-100/50 rounded-2xl border border-slate-100">
                 {Object.values(TransactionType).map(type => (
                   <button

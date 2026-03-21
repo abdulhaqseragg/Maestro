@@ -1,7 +1,7 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { FinanceState } from '../types';
-import { getFinancialInsights, runWhatIfScenario } from '../services/geminiService';
+import { getFinancialInsights, runWhatIfScenario } from '../src/services/geminiService';
 import { BrainCircuit, Sparkles, AlertTriangle, Lightbulb, Play, Loader2 } from 'lucide-react';
 import { translations } from '../translations';
 
@@ -10,24 +10,105 @@ interface AIInsightsProps {
 }
 
 const AIInsights: React.FC<AIInsightsProps> = ({ state }) => {
-  const t = translations[state.settings.language];
-  const [insights, setInsights] = useState<string>('');
+  const lang = state.settings.language;
+  const t = translations[lang];
+  
+  // ─── Initial State from Cache ──────────────────────────────
+  const getInitialData = () => {
+    const userId = state.settings.userId || 'default';
+    const cached = localStorage.getItem(`maestro_ai_cache_${userId}`);
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached);
+        return { insights: parsed.data, fingerprint: parsed.fingerprint };
+      } catch { return { insights: '', fingerprint: '' }; }
+    }
+    return { insights: '', fingerprint: '' };
+  };
+
+  const initialData = getInitialData();
+  const [insights, setInsights] = useState<string>(initialData.insights);
   const [loading, setLoading] = useState(false);
+  const [errorType, setErrorType] = useState<'NONE' | 'MISSING_KEY' | 'INVALID_KEY' | 'GENERIC' | 'INSUFFICIENT_DATA'>('NONE');
   const [scenario, setScenario] = useState('');
   const [scenarioResult, setScenarioResult] = useState('');
   const [scenarioLoading, setScenarioLoading] = useState(false);
 
+  // ─── Smart Auto-Refresh ─────────────────────────────────────
+  const getDataFingerprint = useCallback(() => {
+    const counts = `${state.accounts.length}-${state.transactions.length}-${state.budgets.length}-${state.payables.length}-${state.receivables.length}-${state.goals.length}`;
+    const balances = state.accounts.reduce((acc, a) => acc + a.balance, 0);
+    return `${counts}-${balances}`;
+  }, [state]);
+
+  useEffect(() => {
+    const fingerprint = getDataFingerprint();
+    const userId = state.settings.userId || 'default';
+    const cacheKey = `maestro_ai_cache_${userId}`;
+    const cached = localStorage.getItem(cacheKey);
+    
+    let shouldFetch = false;
+    if (cached) {
+      const { fingerprint: cachedFingerprint, timestamp } = JSON.parse(cached);
+      const isExpired = Date.now() - timestamp > 1000 * 60 * 60 * 24;
+      if (cachedFingerprint !== fingerprint || isExpired) {
+        shouldFetch = true;
+      }
+    } else {
+      shouldFetch = true;
+    }
+
+    if (shouldFetch && !loading) {
+      fetchInsights();
+    }
+  }, [getDataFingerprint, state.settings.userId]);
+
   const fetchInsights = async () => {
     setLoading(true);
+    setErrorType('NONE');
+    window.dispatchEvent(new CustomEvent('maestro:ai-start'));
     try {
       const res = await getFinancialInsights(state);
-      setInsights(res || t.ai.placeholderInsight);
-    } catch (error) {
-      setInsights(t.ai.placeholderInsight);
+      if (res) {
+        setInsights(res);
+        const userId = state.settings.userId || 'default';
+        const cacheKey = `maestro_ai_cache_${userId}`;
+        localStorage.setItem(cacheKey, JSON.stringify({
+          data: res,
+          fingerprint: getDataFingerprint(),
+          timestamp: Date.now()
+        }));
+      } else {
+        setInsights(t.ai.placeholderInsight);
+      }
+    } catch (error: any) {
+      console.error('AI Fetch Error:', error);
+      if (error.message === 'API_KEY_MISSING') setErrorType('MISSING_KEY');
+      else if (error.message === 'INVALID_API_KEY') setErrorType('INVALID_KEY');
+      else if (error.message === 'INSUFFICIENT_DATA') setErrorType('INSUFFICIENT_DATA');
+      else {
+        setErrorType('GENERIC');
+        setInsights(t.ai.placeholderInsight);
+      }
     } finally {
       setLoading(false);
+      window.dispatchEvent(new CustomEvent('maestro:ai-end'));
     }
   };
+
+  const handleQuickScenario = (s: string) => {
+    setScenario(s);
+  };
+
+  const quickScenarios = state.settings.language === 'ar' ? [
+    'ماذا لو قمت بسداد جميع ديوني الآن؟',
+    'ماذا لو قمت بتوفير 20% إضافية من دخلي؟',
+    'ماذا لو اشتريت سيارة بالتقسيط (5000 شهرياً)؟',
+  ] : [
+    'What if I pay off all my debts now?',
+    'What if I save an extra 20% of my income?',
+    'What if I buy a car with 5000/mo installments?',
+  ];
 
   const runScenario = async () => {
     if (!scenario) return;
@@ -41,10 +122,6 @@ const AIInsights: React.FC<AIInsightsProps> = ({ state }) => {
       setScenarioLoading(false);
     }
   };
-
-  useEffect(() => {
-    fetchInsights();
-  }, []);
 
   return (
     <div className="space-y-6">
@@ -77,6 +154,41 @@ const AIInsights: React.FC<AIInsightsProps> = ({ state }) => {
                   <Loader2 size={40} className="animate-spin text-indigo-500" />
                   <p className="animate-pulse">{t.ai.crunching}</p>
                 </div>
+              ) : errorType !== 'NONE' ? (
+                <div className="flex flex-col items-center justify-center py-20 text-center space-y-6">
+                  <div className={`w-16 h-16 ${errorType === 'INSUFFICIENT_DATA' ? 'bg-indigo-50 text-indigo-500' : 'bg-rose-50 text-rose-500'} rounded-2xl flex items-center justify-center`}>
+                    {errorType === 'INSUFFICIENT_DATA' ? <Database size={32} /> : <AlertTriangle size={32} />}
+                  </div>
+                  <div>
+                    <h4 className="text-slate-900 font-bold mb-2">
+                      {errorType === 'MISSING_KEY' ? (lang === 'ar' ? 'مفتاح API مفقود' : 'API Key Missing') :
+                       errorType === 'INVALID_KEY' ? (lang === 'ar' ? 'مفتاح API غير صالح' : 'Invalid API Key') :
+                       errorType === 'INSUFFICIENT_DATA' ? (lang === 'ar' ? 'بانتظار بياناتك المالية' : 'Waiting for Financial Data') :
+                       (lang === 'ar' ? 'خطأ في الاتصال' : 'Connection Error')}
+                    </h4>
+                    <p className="text-sm text-slate-500 max-w-xs mx-auto leading-relaxed">
+                      {errorType === 'MISSING_KEY' ? (lang === 'ar' ? 'يرجى إدخال مفتاح Gemini API في الإعدادات لتفعيل التحليل الذكي.' : 'Please enter your Gemini API key in settings to enable smart analysis.') :
+                       errorType === 'INVALID_KEY' ? (lang === 'ar' ? 'مفتاح API الذي أدخلته غير صحيح أو انتهت صلاحيته.' : 'The API key provided is incorrect or has expired.') :
+                       errorType === 'INSUFFICIENT_DATA' ? (lang === 'ar' ? 'الذكاء الاصطناعي يحتاج إلى حسابين ومعاملتين على الأقل لبدء تحليل نمطك المالي.' : 'AI needs at least 2 accounts and 2 transactions to start analyzing your financial patterns.') :
+                       (lang === 'ar' ? 'تعذر الاتصال بخوادم الذكاء الاصطناعي. يرجى التحقق من اتصالك بالإنترنت.' : 'Could not connect to AI servers. Please check your internet connection.')}
+                    </p>
+                  </div>
+                  {errorType === 'INSUFFICIENT_DATA' ? (
+                    <button 
+                      onClick={() => window.dispatchEvent(new CustomEvent('maestro:open-tab', { detail: 'dashboard' }))}
+                      className="px-6 py-2.5 bg-indigo-600 text-white text-xs font-bold rounded-xl hover:bg-indigo-700 transition-all"
+                    >
+                      {lang === 'ar' ? 'إضافة بيانات الآن' : 'Add Data Now'}
+                    </button>
+                  ) : (
+                    <button 
+                      onClick={() => window.dispatchEvent(new CustomEvent('maestro:open-settings'))}
+                      className="px-6 py-2.5 bg-slate-900 text-white text-xs font-bold rounded-xl hover:bg-black transition-all"
+                    >
+                      {lang === 'ar' ? 'انتقل للإعدادات' : 'Go to Settings'}
+                    </button>
+                  )}
+                </div>
               ) : (
                 <div className="whitespace-pre-wrap text-slate-600 leading-relaxed">
                   {insights || t.ai.placeholderInsight}
@@ -95,6 +207,19 @@ const AIInsights: React.FC<AIInsightsProps> = ({ state }) => {
             <p className="text-sm text-indigo-100 mb-4 leading-relaxed">
               {t.ai.predictOutcome}
             </p>
+            
+            <div className="flex flex-wrap gap-2 mb-4">
+              {quickScenarios.map((s, idx) => (
+                <button 
+                  key={idx}
+                  onClick={() => handleQuickScenario(s)}
+                  className="text-[9px] font-bold px-3 py-1.5 bg-white/5 hover:bg-white/20 border border-white/10 rounded-lg transition-all"
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+
             <div className="space-y-4">
               <textarea 
                 value={scenario}

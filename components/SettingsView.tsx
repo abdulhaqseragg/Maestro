@@ -1,11 +1,17 @@
 
 import React, { useState } from 'react';
 import { FinanceState, TransactionType, Category } from '../types';
-import { Globe, DollarSign, Trash2, Database, Plus, ChevronDown, ChevronUp, Edit3, X, AlertTriangle } from 'lucide-react';
+import { Globe, DollarSign, Trash2, Database, Plus, ChevronDown, ChevronUp, Edit3, X, AlertTriangle, Lock, Sparkles } from 'lucide-react';
 import { translations } from '../translations';
+import { generateDemoData } from '../src/services/demoDataService';
+import { authService } from '../src/services/authService';
 
 interface SettingsViewProps {
-  state: FinanceState & { notify: (msg: string, type: any) => void, requestConfirm: (t: string, m: string, c: () => void, d?: boolean) => void };
+  state: FinanceState & { 
+    notify: (msg: string, type: any) => void, 
+    requestConfirm: (t: string, m: string, c: () => void, d?: boolean) => void,
+    role: 'ADMIN' | 'USER'
+  };
   updateState: (updater: (prev: FinanceState) => FinanceState) => void;
 }
 
@@ -17,6 +23,43 @@ const SettingsView: React.FC<SettingsViewProps> = ({ state, updateState }) => {
   // Modal states
   const [isCatModalOpen, setIsCatModalOpen] = useState(false);
   const [catToEdit, setCatToEdit] = useState<{ id?: string, subId?: string, parentId?: string, name: string } | null>(null);
+
+  // PIN Modal states
+  const [isPinModalOpen, setIsPinModalOpen] = useState(false);
+  const [pinData, setPinData] = useState({ pin: '', confirm: '' });
+
+  // API Key State
+  const [geminiKey, setGeminiKey] = useState(localStorage.getItem('maestro_user_gemini_key') || '');
+
+  const saveGeminiKey = () => {
+    localStorage.setItem('maestro_user_gemini_key', geminiKey);
+    state.notify(lang === 'ar' ? 'تم حفظ مفتاح API بنجاح' : 'API Key saved successfully', 'SUCCESS');
+  };
+
+  const handleGenerateDemoData = async () => {
+    const { data: { user } } = await authService.getCurrentUser();
+    if (!user) return;
+
+    state.requestConfirm(
+      lang === 'ar' ? 'توليد بيانات تجريبية' : 'Generate Demo Data',
+      lang === 'ar' 
+        ? 'سيتم إضافة حسابات ومعاملات وأهداف وهمية لاختبار قوة التحليل. هل تريد الاستمرار؟' 
+        : 'Fake accounts, transactions, and goals will be added to test analysis power. Do you want to continue?',
+      () => {
+        const demoData = generateDemoData(user);
+        updateState(prev => ({
+          ...prev,
+          accounts: [...prev.accounts, ...(demoData.accounts || [])],
+          transactions: [...prev.transactions, ...(demoData.transactions || [])],
+          budgets: [...prev.budgets, ...(demoData.budgets || [])],
+          payables: [...prev.payables, ...(demoData.payables || [])],
+          receivables: [...prev.receivables, ...(demoData.receivables || [])],
+          goals: [...prev.goals, ...(demoData.goals || [])]
+        }));
+        state.notify(lang === 'ar' ? 'تم توليد البيانات بنجاح' : 'Demo data generated successfully', 'SUCCESS');
+      }
+    );
+  };
 
   const resetApp = () => {
     state.requestConfirm(
@@ -61,12 +104,45 @@ const SettingsView: React.FC<SettingsViewProps> = ({ state, updateState }) => {
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
-      state.notify(t.settings.exportJson, 'SUCCESS');
+      state.notify(lang === 'ar' ? 'تم تصدير البيانات بنجاح' : 'Data exported successfully', 'SUCCESS');
     } catch (error) {
       console.error('Export failed:', error);
       state.notify('Export failed', 'ERROR');
     }
   };
+
+  const handleImportJSON = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const importedData = JSON.parse(event.target?.result as string);
+        
+        // Basic validation
+        if (!importedData.users || !importedData.accounts) {
+          throw new Error('Invalid backup file');
+        }
+
+        state.requestConfirm(
+          lang === 'ar' ? 'استيراد البيانات' : 'Import Data',
+          lang === 'ar' ? 'سيؤدي هذا إلى استبدال بياناتك الحالية بالبيانات المستوردة. هل تريد الاستمرار؟' : 'This will replace your current data with the imported data. Do you want to continue?',
+          () => {
+            updateState(() => importedData);
+            state.notify(lang === 'ar' ? 'تم استيراد البيانات بنجاح' : 'Data imported successfully', 'SUCCESS');
+            setTimeout(() => window.location.reload(), 1000);
+          },
+          true
+        );
+      } catch (err) {
+        state.notify(lang === 'ar' ? 'ملف غير صالح' : 'Invalid file format', 'ERROR');
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const lang = state.settings.language;
 
   const filteredCategories = state.categories.filter(c => c.type === activeCatType);
 
@@ -152,6 +228,48 @@ const SettingsView: React.FC<SettingsViewProps> = ({ state, updateState }) => {
     );
   };
 
+  const handleSavePin = () => {
+    if (pinData.pin.length !== 6 || pinData.pin !== pinData.confirm) {
+      state.notify(lang === 'ar' ? 'الرمز غير متطابق أو غير مكتمل' : 'PIN mismatch or incomplete', 'ERROR');
+      return;
+    }
+    updateState(prev => {
+      const updatedSettings = { 
+        ...state.settings, 
+        pin: pinData.pin, 
+        isPinEnabled: true 
+      };
+      return {
+        ...prev,
+        users: prev.users.map(u => u.id === state.settings.userId ? { ...u, settings: updatedSettings } : u)
+      };
+    });
+    setIsPinModalOpen(false);
+    state.notify(lang === 'ar' ? 'تم تفعيل الرمز السري بنجاح' : 'PIN enabled successfully', 'SUCCESS');
+  };
+
+  const handleTogglePin = (enabled: boolean) => {
+    if (enabled) {
+      setIsPinModalOpen(true);
+    } else {
+      state.requestConfirm(
+        lang === 'ar' ? 'تعطيل الرمز السري' : 'Disable PIN',
+        lang === 'ar' ? 'هل أنت متأكد من تعطيل حماية الرمز السري؟' : 'Are you sure you want to disable PIN protection?',
+        () => {
+          updateState(prev => {
+            const updatedSettings = { ...state.settings, isPinEnabled: false };
+            return {
+              ...prev,
+              users: prev.users.map(u => u.id === state.settings.userId ? { ...u, settings: updatedSettings } : u)
+            };
+          });
+          state.notify(lang === 'ar' ? 'تم تعطيل الرمز السري' : 'PIN disabled', 'SUCCESS');
+        },
+        true
+      );
+    }
+  };
+
   return (
     <div className="max-w-3xl mx-auto space-y-8 animate-soft">
       {/* General Settings */}
@@ -194,6 +312,37 @@ const SettingsView: React.FC<SettingsViewProps> = ({ state, updateState }) => {
               <option value="USD">{t.settings.currencies.USD}</option>
               <option value="EUR">{t.settings.currencies.EUR}</option>
             </select>
+          </div>
+
+          {/* AI Configuration */}
+          <div className="pt-6 border-t border-slate-50 space-y-4">
+            <div className="flex items-center gap-3 mb-2">
+              <div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl"><Database size={18} /></div>
+              <p className="text-sm font-bold text-slate-800">{lang === 'ar' ? 'إعدادات الذكاء الاصطناعي' : 'AI Configuration'}</p>
+            </div>
+            <div className="space-y-3">
+              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-1">Gemini API Key</label>
+              <div className="flex gap-2">
+                <input 
+                  type="password"
+                  value={geminiKey}
+                  onChange={e => setGeminiKey(e.target.value)}
+                  placeholder="Enter your Gemini API key..."
+                  className="flex-1 px-4 py-2.5 bg-slate-50 border border-slate-100 rounded-xl text-xs focus:ring-4 focus:ring-slate-100 outline-none transition-all"
+                />
+                <button 
+                  onClick={saveGeminiKey}
+                  className="px-4 py-2.5 bg-slate-900 text-white text-[10px] font-bold uppercase rounded-xl hover:bg-black transition-all"
+                >
+                  {t.common.save}
+                </button>
+              </div>
+              <p className="text-[9px] text-slate-400 leading-relaxed px-1">
+                {lang === 'ar' 
+                  ? 'تحتاج إلى مفتاح Gemini API لتفعيل التحليلات المالية الذكية. يمكنك الحصول عليه مجاناً من Google AI Studio.' 
+                  : 'A Gemini API key is required for smart financial insights. You can get one for free from Google AI Studio.'}
+              </p>
+            </div>
           </div>
         </div>
       </section>
@@ -306,24 +455,102 @@ const SettingsView: React.FC<SettingsViewProps> = ({ state, updateState }) => {
         </div>
       </section>
 
+      {/* Security PIN Settings (User only) */}
+      {state.role !== 'ADMIN' && (
+        <section className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden hover-lift">
+          <div className="p-6 border-b border-slate-50 bg-slate-50/50">
+            <h3 className="text-sm font-bold text-slate-900">{t.security.title}</h3>
+          </div>
+          <div className="p-6 space-y-6">
+            <div className="flex items-center justify-between p-5 bg-slate-50/50 rounded-[2rem] border border-slate-100/50 group transition-all">
+              <div className="flex items-center gap-4">
+                <div className="p-3 bg-white rounded-2xl text-slate-400 group-hover:text-indigo-600 transition-colors shadow-sm">
+                  <Lock size={20} />
+                </div>
+                <div>
+                  <p className="text-sm font-bold text-slate-700">{t.security.enablePin}</p>
+                  <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest">{lang === 'ar' ? 'حماية الدخول برمز 6 أرقام' : 'Secure access with 6-digit PIN'}</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => handleTogglePin(!state.settings.isPinEnabled)}
+                className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors duration-300 focus:outline-none ${
+                  state.settings.isPinEnabled ? 'bg-indigo-600' : 'bg-slate-200'
+                }`}
+              >
+                <span className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform duration-300 ${
+                  state.settings.isPinEnabled ? (lang === 'ar' ? '-translate-x-6' : 'translate-x-6') : (lang === 'ar' ? '-translate-x-1' : 'translate-x-1')
+                }`} />
+              </button>
+            </div>
+
+            {state.settings.isPinEnabled && (
+              <div className="flex items-center justify-between pt-4 border-t border-slate-50">
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{t.security.setPin}</p>
+                <button 
+                  onClick={() => setIsPinModalOpen(true)}
+                  className="flex items-center gap-2 text-[10px] font-black uppercase tracking-metadata text-indigo-600 hover:text-indigo-700 btn-interaction"
+                >
+                  <Edit3 size={14} /> {t.security.changePin}
+                </button>
+              </div>
+            )}
+          </div>
+        </section>
+      )}
+
       {/* Storage & Export Management */}
       <section className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden hover-lift">
         <div className="p-6 border-b border-slate-50 bg-slate-50/50">
           <h3 className="text-sm font-bold text-slate-900">{t.settings.dataPrivacy}</h3>
         </div>
         <div className="p-6 space-y-4">
-          <div className="p-5 bg-slate-50/50 rounded-[2rem] flex items-center justify-between group border border-slate-100/50 transition-all">
+          <div className="p-5 bg-slate-50/50 rounded-[2rem] flex flex-col sm:flex-row items-start sm:items-center justify-between group border border-slate-100/50 transition-all gap-4">
             <div className="flex items-center gap-4">
               <div className="p-3 bg-white rounded-2xl text-slate-400 group-hover:text-slate-900 transition-colors shadow-sm">
                 <Database size={20} />
               </div>
-              <p className="text-sm font-bold text-slate-700">{t.settings.exportJson}</p>
+              <div>
+                <p className="text-sm font-bold text-slate-700">{t.settings.exportJson}</p>
+                <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest">{lang === 'ar' ? 'تصدير أو استيراد نسخة احتياطية كاملة' : 'Export or import full backup'}</p>
+              </div>
+            </div>
+            <div className="flex gap-2 w-full sm:w-auto">
+              <label className="flex-1 sm:flex-none">
+                <input 
+                  type="file" 
+                  accept=".json" 
+                  onChange={handleImportJSON} 
+                  className="hidden" 
+                />
+                <div className="px-6 py-2.5 bg-white border border-slate-200 text-[10px] font-bold uppercase tracking-wider rounded-xl hover:bg-slate-50 hover:border-slate-300 hover:text-slate-900 transition-all shadow-sm btn-interaction cursor-pointer text-center">
+                  {lang === 'ar' ? 'استيراد' : 'Import'}
+                </div>
+              </label>
+              <button 
+                onClick={handleExportJSON}
+                className="flex-1 sm:flex-none px-6 py-2.5 bg-slate-900 text-white text-[10px] font-bold uppercase tracking-wider rounded-xl hover:bg-black transition-all shadow-sm btn-interaction"
+              >
+                {t.common.export}
+              </button>
+            </div>
+          </div>
+
+          <div className="p-5 bg-indigo-50/30 rounded-[2rem] flex items-center justify-between group border border-indigo-100/30 transition-all">
+            <div className="flex items-center gap-4">
+              <div className="p-3 bg-white rounded-2xl text-indigo-400 group-hover:text-indigo-600 transition-colors shadow-sm">
+                <Sparkles size={20} />
+              </div>
+              <div>
+                <p className="text-sm font-bold text-indigo-900">{lang === 'ar' ? 'توليد بيانات تجريبية' : 'Generate Demo Data'}</p>
+                <p className="text-[9px] text-indigo-400 font-bold uppercase tracking-widest">{lang === 'ar' ? 'أضف بيانات وهمية لاختبار الذكاء الاصطناعي' : 'Add fake data to test AI insights'}</p>
+              </div>
             </div>
             <button 
-              onClick={handleExportJSON}
-              className="px-6 py-2.5 bg-white border border-slate-200 text-[10px] font-bold uppercase tracking-wider rounded-xl hover:bg-slate-50 hover:border-slate-300 hover:text-slate-900 transition-all shadow-sm btn-interaction"
+              onClick={handleGenerateDemoData}
+              className="px-6 py-2.5 bg-indigo-600 text-white text-[10px] font-bold uppercase tracking-wider rounded-xl hover:bg-indigo-700 transition-all shadow-sm btn-interaction"
             >
-              {t.common.export}
+              {lang === 'ar' ? 'توليد' : 'Generate'}
             </button>
           </div>
 
@@ -378,6 +605,54 @@ const SettingsView: React.FC<SettingsViewProps> = ({ state, updateState }) => {
                 {t.common.cancel}
               </button>
               <button onClick={handleSaveCategory} className="flex-1 py-3.5 text-[10px] font-bold text-white bg-slate-900 rounded-2xl hover:bg-black shadow-xl shadow-slate-100 btn-interaction">
+                {t.common.save}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* PIN Setup Modal */}
+      {isPinModalOpen && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-slate-900/10 backdrop-blur-md animate-in fade-in duration-300" onClick={() => setIsPinModalOpen(false)} />
+          <div className="relative bg-white rounded-[2.5rem] shadow-2xl w-full max-w-sm overflow-hidden animate-soft">
+            <div className="px-8 py-6 border-b border-slate-50 flex items-center justify-between bg-slate-50/50">
+              <h3 className="text-sm font-black text-slate-900 uppercase tracking-widest">{t.security.setupPin}</h3>
+              <button onClick={() => setIsPinModalOpen(false)} className="text-slate-400 hover:text-slate-900 btn-interaction">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="p-8 space-y-6">
+              <div>
+                <label className="block text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-2 px-1">{t.security.enterPin}</label>
+                <input 
+                  autoFocus
+                  type="password" 
+                  maxLength={6}
+                  value={pinData.pin}
+                  onChange={e => setPinData({ ...pinData, pin: e.target.value.replace(/\D/g, '') })}
+                  className="w-full px-5 py-3.5 bg-slate-50 border border-slate-100 rounded-2xl focus:ring-4 focus:ring-slate-100 outline-none text-center text-2xl font-black tracking-[1em] transition-all"
+                  placeholder="••••••"
+                />
+              </div>
+              <div>
+                <label className="block text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-2 px-1">{t.security.confirmPin}</label>
+                <input 
+                  type="password" 
+                  maxLength={6}
+                  value={pinData.confirm}
+                  onChange={e => setPinData({ ...pinData, confirm: e.target.value.replace(/\D/g, '') })}
+                  className="w-full px-5 py-3.5 bg-slate-50 border border-slate-100 rounded-2xl focus:ring-4 focus:ring-slate-100 outline-none text-center text-2xl font-black tracking-[1em] transition-all"
+                  placeholder="••••••"
+                />
+              </div>
+            </div>
+            <div className="p-8 bg-slate-50/50 flex gap-3">
+              <button onClick={() => setIsPinModalOpen(false)} className="flex-1 py-3.5 text-[10px] font-bold text-slate-500 bg-white border border-slate-100 rounded-2xl hover:bg-slate-50 btn-interaction">
+                {t.common.cancel}
+              </button>
+              <button onClick={handleSavePin} className="flex-1 py-3.5 text-[10px] font-bold text-white bg-slate-900 rounded-2xl hover:bg-black shadow-xl shadow-slate-100 btn-interaction">
                 {t.common.save}
               </button>
             </div>

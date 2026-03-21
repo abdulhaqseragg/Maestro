@@ -1,5 +1,4 @@
-
-import { Account, Transaction, TransactionType, Payable, Receivable } from '../types';
+import { Account, Transaction, TransactionType, Payable, Receivable } from '../../types';
 
 export const financeLogic = {
   calculateAccountBalance: (account: Account, transactions: Transaction[]): number => {
@@ -34,7 +33,8 @@ export const financeLogic = {
     return receivables.reduce((acc, r) => acc + r.remainingBalance, 0);
   },
 
-  formatCurrency: (amount: number, currency: string = 'EGP', language: string = 'en') => {
+  formatCurrency: (amount: number, currency: string = 'EGP', language: string = 'en', isPrivacyMode: boolean = false) => {
+    if (isPrivacyMode) return '****';
     const locale = language === 'ar' ? 'ar-EG' : 'en-US';
     return new Intl.NumberFormat(locale, {
       style: 'currency',

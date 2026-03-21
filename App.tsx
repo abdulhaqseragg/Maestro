@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { 
   FinanceState, 
   AccountType, 
@@ -15,7 +15,7 @@ import {
   UserPermissions,
   FinanceNotification
 } from './types';
-import { storageService } from './services/storageService';
+import { storageService } from './src/services/storageService';
 import { authService } from './src/services/authService';
 import { NAV_ITEMS, DEFAULT_EXPENSE_CATEGORIES, DEFAULT_INCOME_CATEGORIES } from './constants';
 import Dashboard from './components/Dashboard';
@@ -24,12 +24,13 @@ import Transactions from './components/Transactions';
 import Obligations from './components/Obligations';
 import Budgets from './components/Budgets';
 import Goals from './components/Goals';
-import Login from './components/LoginSaaS';
+import Login from './components/Login';
+import PinEntry from './components/PinEntry';
 import AIInsights from './components/AIInsights';
 import SettingsView from './components/SettingsView';
 import UserManagement from './components/UserManagement';
 import AdminUserManagement from './components/AdminUserManagement';
-import { Menu, X, Plus, Sparkles, LogOut, ShieldCheck, CheckCircle, AlertCircle, Info, AlertTriangle, Languages, Globe, Wifi, WifiOff } from 'lucide-react';
+import { Menu, X, Plus, Sparkles, LogOut, ShieldCheck, CheckCircle, AlertCircle, Info, AlertTriangle, Languages, Globe, Wifi, WifiOff, Eye, EyeOff, Cloud, CloudOff, RefreshCw } from 'lucide-react';
 import { translations } from './translations';
 
 const INITIAL_PERMISSIONS: UserPermissions = {
@@ -93,11 +94,37 @@ const App: React.FC = () => {
   console.log('App component loaded');
   const [globalState, setGlobalState] = useState<FinanceState>(INITIAL_STATE);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [isPinVerified, setIsPinVerified] = useState(false);
+  const [needsPin, setNeedsPin] = useState(false);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [isSidebarOpen, setSidebarOpen] = useState(false);
   const [isLoaded, setIsLoaded] = useState(false);
   const [openAddModalOnMount, setOpenAddModalOnMount] = useState(false);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [syncStatus, setSyncStatus] = useState({ pending: 0, isSyncing: false });
+  const [isAIProcessing, setIsAIProcessing] = useState(false);
+  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // ── Sync Status Polling ──────────────────────────────
+  useEffect(() => {
+    const checkSync = async () => {
+      const status = await storageService.getSyncStatus();
+      setSyncStatus({ pending: status.pending, isSyncing: status.isSyncing });
+    };
+    
+    // Listen for AI Processing events
+    const onAIStart = () => setIsAIProcessing(true);
+    const onAIEnd = () => setIsAIProcessing(false);
+    window.addEventListener('maestro:ai-start', onAIStart);
+    window.addEventListener('maestro:ai-end', onAIEnd);
+
+    const interval = setInterval(checkSync, 3000);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('maestro:ai-start', onAIStart);
+      window.removeEventListener('maestro:ai-end', onAIEnd);
+    };
+  }, []);
 
   // Global Notification & Confirmation State
   const [notifications, setNotifications] = useState<FinanceNotification[]>([]);
@@ -125,6 +152,34 @@ const App: React.FC = () => {
     setConfirmModal({ isOpen: true, title, message, onConfirm, isDestructive });
   }, []);
 
+  // ── Session Timeout (5 mins) ─────────────────────────
+  const resetTimeout = () => {
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    if (currentUser && currentUser.role !== 'ADMIN' && currentUser.settings?.isPinEnabled) {
+      timeoutRef.current = setTimeout(() => {
+        setIsPinVerified(false);
+        notify(currentLang === 'ar' ? 'انتهت الجلسة، يرجى إدخال الرمز السري' : 'Session timed out, please enter PIN', 'INFO');
+      }, 5 * 60 * 1000); // 5 minutes
+    }
+  };
+
+  useEffect(() => {
+    if (currentUser && needsPin) {
+      window.addEventListener('mousemove', resetTimeout);
+      window.addEventListener('keypress', resetTimeout);
+      window.addEventListener('click', resetTimeout);
+      window.addEventListener('scroll', resetTimeout);
+      resetTimeout();
+    }
+    return () => {
+      window.removeEventListener('mousemove', resetTimeout);
+      window.removeEventListener('keypress', resetTimeout);
+      window.removeEventListener('click', resetTimeout);
+      window.removeEventListener('scroll', resetTimeout);
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    };
+  }, [currentUser, needsPin, currentLang]);
+
   const scopedState = useMemo(() => {
     console.log('[App] Creating scopedState for user:', currentUser);
     if (!currentUser) {
@@ -141,6 +196,7 @@ const App: React.FC = () => {
       goals: globalState.goals.filter(g => g.userId === currentUser.id),
       categories: globalState.categories.filter(c => c.userId === currentUser.id),
       settings: currentUser.settings,
+      role: currentUser.role,
       globalSettings: globalState.globalSettings,
       notify,
       requestConfirm
@@ -151,7 +207,17 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const initData = async () => {
-      // ── Restore session from JWT token ───────────────────
+      // ── Load all local data first ────────────────────────
+      const saved = await storageService.load();
+      if (saved) {
+        setGlobalState(prev => ({ 
+          ...prev, 
+          ...saved,
+          users: saved.users && saved.users.length > 0 ? saved.users : INITIAL_USERS
+        }));
+      }
+
+      // ── Restore session ──────────────────────────────────
       try {
         const { data: { user: authUser } } = await authService.getCurrentUser();
         if (authUser) {
@@ -160,34 +226,17 @@ const App: React.FC = () => {
             id:             authUser.id,
             email:          authUser.email,
             username:       authUser.username || authUser.email.split('@')[0],
-            password:       '',
+            password:       authUser.password || '',
             role:           authUser.role as any,
             permissions:    authUser.permissions || {} as any,
             settings:       authUser.settings    || { currency: 'EGP', language: 'en' },
             expirationDate: authUser.expirationDate || authUser.expiration_date,
           };
 
-          // Load user's cloud data
-          const saved = await storageService.load();
-          if (saved) {
-            if (!saved.users || saved.users.length === 0) saved.users = INITIAL_USERS;
-            setGlobalState(prev => ({ ...prev, ...saved }));
-          }
-
           handleLogin(appUser);
-          setIsLoaded(true);
-          return;
         }
       } catch {
-        // No valid session — continue to login screen
-      }
-
-      // ── Dev bypass (only when VITE_DISABLE_LOGIN=true) ───
-      if ((import.meta as any).env.VITE_DISABLE_LOGIN === 'true') {
-        const defaultUser = INITIAL_STATE.users?.find(u => u.id === 'admin-1');
-        if (defaultUser) {
-          handleLogin(defaultUser);
-        }
+        // No valid session
       }
 
       setIsLoaded(true);
@@ -202,12 +251,30 @@ const App: React.FC = () => {
       notify('Session expired. Please sign in again.', 'WARNING');
     };
     window.addEventListener('maestro:session-expired', onSessionExpired);
-    return () => window.removeEventListener('maestro:session-expired', onSessionExpired);
+    
+    // Listen for Settings navigation from AI Insights
+    const onOpenSettings = () => setActiveTab('settings');
+    const onOpenTab = (e: any) => setActiveTab(e.detail);
+    
+    window.addEventListener('maestro:open-settings', onOpenSettings);
+    window.addEventListener('maestro:open-tab', onOpenTab);
+
+    return () => {
+      window.removeEventListener('maestro:session-expired', onSessionExpired);
+      window.removeEventListener('maestro:open-settings', onOpenSettings);
+      window.removeEventListener('maestro:open-tab', onOpenTab);
+    };
   }, []);
 
   useEffect(() => {
     if (isLoaded) storageService.save(globalState);
   }, [globalState, isLoaded]);
+
+  useEffect(() => {
+    if (currentUser) {
+      authService.updateSession(currentUser);
+    }
+  }, [currentUser]);
 
   useEffect(() => {
     document.documentElement.dir = isRTL ? 'rtl' : 'ltr';
@@ -230,10 +297,15 @@ const App: React.FC = () => {
   const updateGlobalState = (updater: (prev: FinanceState) => FinanceState) => {
     setGlobalState(prev => {
       const newState = updater(prev);
+      console.log('[App] updateGlobalState: newState users count:', newState.users.length);
       if (currentUser) {
         const updatedUser = newState.users.find(u => u.id === currentUser.id);
-        if (updatedUser && (updatedUser.settings.language !== currentUser.settings.language || updatedUser.settings.currency !== currentUser.settings.currency)) {
-          setCurrentUser(updatedUser);
+        if (updatedUser) {
+          // Sync settings to currentUser state if they changed
+          if (JSON.stringify(updatedUser.settings) !== JSON.stringify(currentUser.settings)) {
+            console.log('[App] Syncing updated user settings to currentUser');
+            setCurrentUser(updatedUser);
+          }
         }
       }
       return newState;
@@ -244,27 +316,38 @@ const App: React.FC = () => {
     console.log('[App] handleLogin called with user:', user);
     setCurrentUser(user);
 
-    // Load user data from Supabase if authenticated
-    if (user.id && user.id !== 'admin-1') { // Skip for demo admin
-      const userData = await storageService.loadUserData(user.id);
-      if (userData) {
-        setGlobalState(prev => ({
-          ...prev,
-          accounts: [...prev.accounts, ...userData.accounts],
-          transactions: [...prev.transactions, ...userData.transactions],
-          users: [...prev.users.filter(u => u.id !== user.id), user] // Update user data
-        }));
-      }
+    // ── Check if PIN is required ────────────────────────
+    if (user.role !== 'ADMIN' && user.settings?.isPinEnabled && user.settings?.pin) {
+      setNeedsPin(true);
+      setIsPinVerified(false);
     } else {
-      // For demo admin, ensure categories exist
-      setGlobalState(prev => {
-        const userHasCats = prev.categories.some(c => c.userId === user.id);
-        if (!userHasCats) {
-          return { ...prev, categories: [...prev.categories, ...createDefaultCategories(user.id)] };
-        }
-        return prev;
-      });
+      setNeedsPin(false);
+      setIsPinVerified(true);
     }
+
+    // Merge state with any existing data in storage
+    const userData = await storageService.loadUserData(user.id);
+    setGlobalState(prev => {
+      const mergedState = userData ? { ...prev, ...userData } : prev;
+      
+      // Ensure the user is in the users list
+      const userExists = mergedState.users.some(u => u.id === user.id);
+      const updatedUsers = userExists 
+        ? mergedState.users.map(u => u.id === user.id ? user : u)
+        : [...mergedState.users, user];
+
+      // Ensure the user has default categories
+      const userHasCats = mergedState.categories.some(c => c.userId === user.id);
+      const updatedCategories = userHasCats 
+        ? mergedState.categories 
+        : [...mergedState.categories, ...createDefaultCategories(user.id)];
+
+      return {
+        ...mergedState,
+        users: updatedUsers,
+        categories: updatedCategories
+      };
+    });
 
     if (user.role === 'ADMIN') {
       setActiveTab('user-management');
@@ -277,6 +360,8 @@ const App: React.FC = () => {
   const handleLogout = async () => {
     await authService.signOut();
     setCurrentUser(null);
+    setIsPinVerified(false);
+    setNeedsPin(false);
     setActiveTab('dashboard');
     notify(t.common.logout, 'INFO');
   };
@@ -302,6 +387,14 @@ const App: React.FC = () => {
     setActiveTab('transactions');
   };
 
+  const handlePrivacyToggle = () => {
+    if (!currentUser) return;
+    updateScopedState(prev => ({
+      ...prev,
+      settings: { ...prev.settings, isPrivacyMode: !prev.settings.isPrivacyMode }
+    }));
+  };
+
   const updateScopedState = (updater: (prev: any) => any) => {
     if (!currentUser) return;
     updateGlobalState(prev => {
@@ -318,6 +411,11 @@ const App: React.FC = () => {
 
       const result = updater(currentUserData);
       const injectUserId = (arr: any[]) => arr.map(item => ({ ...item, userId: currentUser.id }));
+
+      // Update local currentUser state to reflect changes immediately
+      const updatedUser = { ...currentUser, settings: result.settings };
+      setCurrentUser(updatedUser);
+      authService.updateSession(updatedUser);
 
       return {
         ...prev,
@@ -389,10 +487,25 @@ const App: React.FC = () => {
     );
   }
 
+  if (needsPin && !isPinVerified) {
+    return (
+      <PinEntry 
+        correctPin={currentUser.settings.pin!} 
+        onSuccess={() => setIsPinVerified(true)} 
+        onCancel={handleLogout}
+        lang={currentLang}
+      />
+    );
+  }
+
   const filteredNavItems = NAV_ITEMS.filter(item => {
     if (item.adminOnly) return currentUser.role === 'ADMIN';
     return currentUser.permissions[item.id as keyof UserPermissions];
   });
+
+  const bottomNavItems = filteredNavItems.filter(item => 
+    ['dashboard', 'accounts', 'transactions', 'obligations', 'settings'].includes(item.id)
+  );
 
   return (
     <div className={`flex h-screen bg-[#fcfdfe] overflow-hidden ${isRTL ? 'font-arabic' : ''}`}>
@@ -544,6 +657,45 @@ const App: React.FC = () => {
             >
               <Globe size={20} strokeWidth={2.5} />
             </button>
+            <button 
+              onClick={handlePrivacyToggle}
+              className={`p-3 rounded-2xl transition-colors btn-interaction flex items-center justify-center ${
+                currentUser?.settings?.isPrivacyMode ? 'text-indigo-600 bg-indigo-50' : 'text-slate-500 hover:bg-slate-50'
+              }`}
+              title={currentUser?.settings?.isPrivacyMode ? 'Disable Privacy Mode' : 'Enable Privacy Mode'}
+            >
+              {currentUser?.settings?.isPrivacyMode ? <EyeOff size={20} strokeWidth={2.5} /> : <Eye size={20} strokeWidth={2.5} />}
+            </button>
+
+            {/* AI Background Indicator */}
+            {isAIProcessing && (
+              <div className="flex items-center gap-2 px-4 py-2 rounded-2xl bg-indigo-600 text-white shadow-lg shadow-indigo-200 animate-in fade-in zoom-in duration-300">
+                <Sparkles size={16} className="animate-pulse" />
+                <span className="text-[10px] font-black uppercase tracking-widest hidden sm:block">AI Analyzing</span>
+              </div>
+            )}
+
+            {/* Sync Indicator */}
+            <div 
+              className={`flex items-center gap-2 px-4 py-2 rounded-2xl border transition-all duration-500 ${
+                syncStatus.isSyncing ? 'bg-indigo-50 border-indigo-100 text-indigo-600' :
+                syncStatus.pending > 0 ? 'bg-amber-50 border-amber-100 text-amber-600' :
+                'bg-slate-50 border-slate-100 text-slate-400'
+              }`}
+              title={syncStatus.isSyncing ? 'Syncing...' : `${syncStatus.pending} pending operations`}
+            >
+              {syncStatus.isSyncing ? (
+                <RefreshCw size={16} className="animate-spin" />
+              ) : syncStatus.pending > 0 ? (
+                <CloudOff size={16} />
+              ) : (
+                <Cloud size={16} />
+              )}
+              <span className="text-[10px] font-black uppercase tracking-widest hidden sm:block">
+                {syncStatus.isSyncing ? 'Syncing' : syncStatus.pending > 0 ? `${syncStatus.pending} Pending` : 'Synced'}
+              </span>
+            </div>
+
             <div className={`p-3 rounded-2xl flex items-center justify-center transition-colors ${
               isOnline ? 'text-emerald-500' : 'text-slate-300'
             }`}>
@@ -562,13 +714,41 @@ const App: React.FC = () => {
         </header>
 
         <div className="flex-1 overflow-y-auto custom-scrollbar">
-          <div className="max-w-7xl mx-auto p-8 lg:p-14">{renderContent()}</div>
-          <div className="h-16" />
+          <div className="max-w-7xl mx-auto p-4 sm:p-8 lg:p-14">{renderContent()}</div>
+          <div className="h-24 lg:h-16" />
         </div>
         
+        {/* Bottom Navigation (Mobile Only) */}
+        <nav className="lg:hidden fixed bottom-0 left-0 right-0 bg-white/80 backdrop-blur-xl border-t border-slate-100 px-2 py-3 flex items-center justify-around z-50 safe-area-bottom">
+          {bottomNavItems.map(item => (
+            <button
+              key={item.id}
+              onClick={() => {
+                setOpenAddModalOnMount(false);
+                setActiveTab(item.id);
+                // Haptic feedback simulation
+                if ('vibrate' in navigator) navigator.vibrate(5);
+              }}
+              className={`flex flex-col items-center gap-1 p-2 rounded-2xl transition-all duration-300 min-w-[64px] relative
+                ${activeTab === item.id ? 'text-indigo-600 scale-110' : 'text-slate-400'}`}
+            >
+              <div className={`p-2 rounded-xl transition-all duration-300 ${activeTab === item.id ? 'bg-indigo-50 shadow-sm' : ''}`}>
+                {React.cloneElement(item.icon as React.ReactElement, { 
+                  size: 20, 
+                  strokeWidth: activeTab === item.id ? 2.5 : 2,
+                })}
+              </div>
+              <span className="text-[9px] font-black uppercase tracking-widest">{t.nav[item.id]}</span>
+              {activeTab === item.id && (
+                <div className="absolute -top-1 w-1 h-1 bg-indigo-600 rounded-full animate-pulse" />
+              )}
+            </button>
+          ))}
+        </nav>
+        
         {currentUser.permissions.transactions && (
-          <button className="md:hidden fixed bottom-8 right-8 w-16 h-16 bg-slate-900 text-white rounded-[1.5rem] shadow-2xl flex items-center justify-center z-40 btn-interaction ring-8 ring-slate-900/10" onClick={handleQuickAddTransaction}>
-            <Plus size={28} strokeWidth={3} />
+          <button className="md:hidden fixed bottom-24 right-6 w-14 h-14 bg-slate-900 text-white rounded-2xl shadow-2xl flex items-center justify-center z-40 btn-interaction ring-8 ring-slate-900/10 active:scale-90" onClick={handleQuickAddTransaction}>
+            <Plus size={24} strokeWidth={3} />
           </button>
         )}
       </main>

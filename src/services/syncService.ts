@@ -1,13 +1,13 @@
 /**
- * Sync Service — Self-hosted Backend version
- * Uses apiClient instead of Supabase for all operations.
+ * Sync Service — Hybrid version (Cloud + Offline)
+ * Handles background synchronization between local IndexedDB and remote API.
  */
 import { offlineStorage } from './offlineStorage';
 import { apiClient } from './apiClient';
 
 export class SyncService {
   private isOnline: boolean = navigator.onLine;
-  private syncInProgress: boolean = false;
+  private isSyncing: boolean = false;
 
   constructor() {
     this.init();
@@ -15,27 +15,13 @@ export class SyncService {
 
   private init() {
     window.addEventListener('online', () => {
-      console.log('[SyncService] Connection restored');
       this.isOnline = true;
-      this.syncPendingData();
+      this.syncPendingData(); // Trigger sync when coming back online
     });
 
     window.addEventListener('offline', () => {
-      console.log('[SyncService] Connection lost');
       this.isOnline = false;
     });
-
-    // Register background sync if supported
-    if ('serviceWorker' in navigator && 'sync' in (window as any).ServiceWorkerRegistration?.prototype) {
-      navigator.serviceWorker.ready.then((registration: any) => {
-        registration.sync?.register('sync-pending-data');
-      }).catch(() => {});
-    }
-
-    // Initial sync check
-    if (this.isOnline) {
-      this.syncPendingData();
-    }
   }
 
   isDeviceOnline(): boolean {
@@ -44,85 +30,68 @@ export class SyncService {
 
   async storePendingOperation(type: string, data: any): Promise<string> {
     const operation = { type, data, timestamp: Date.now() };
-    const operationId = await offlineStorage.storePendingOperation(operation);
-
-    if (this.isOnline && !this.syncInProgress) {
+    const id = await offlineStorage.storePendingOperation(operation);
+    
+    // If online, try to sync immediately
+    if (this.isOnline) {
       this.syncPendingData();
     }
-
-    return operationId as string;
+    
+    return id;
   }
 
   async syncPendingData(): Promise<void> {
-    if (this.syncInProgress || !this.isOnline) return;
+    if (this.isSyncing || !this.isOnline) return;
 
-    this.syncInProgress = true;
-    console.log('[SyncService] Starting data synchronization...');
+    const pending = await offlineStorage.getPendingOperations();
+    const unsynced = pending.filter(op => !op.synced);
+
+    if (unsynced.length === 0) return;
+
+    this.isSyncing = true;
+    console.log(`[SyncService] Starting sync for ${unsynced.length} operations...`);
 
     try {
-      const pendingOperations = await offlineStorage.getPendingOperations();
-      if (!pendingOperations || !Array.isArray(pendingOperations) || pendingOperations.length === 0) {
-        console.log('[SyncService] No pending operations to sync');
-        return;
-      }
-
-      console.log(`[SyncService] Syncing ${(pendingOperations as any[]).length} operations...`);
-
-      for (const operation of pendingOperations as any[]) {
+      for (const op of unsynced) {
         try {
-          await this.syncOperation(operation);
-          await offlineStorage.markOperationSynced(operation.id);
-        } catch (error) {
-          console.error(`[SyncService] Failed to sync operation ${operation.id}:`, error);
+          // Map operation types to API calls
+          // Example: CREATE_TRANSACTION -> POST /transactions
+          const endpoint = this.getEndpointForType(op.type);
+          if (endpoint) {
+            await apiClient.post(endpoint, op.data);
+            await offlineStorage.markOperationSynced(op.id);
+          }
+        } catch (err) {
+          console.error(`[SyncService] Failed to sync operation ${op.id}:`, err);
+          // Stop syncing if we hit a serious network error
+          break;
         }
       }
-
+      
       await offlineStorage.cleanupSyncedOperations();
-      console.log('[SyncService] Data synchronization completed');
-    } catch (error) {
-      console.error('[SyncService] Sync failed:', error);
     } finally {
-      this.syncInProgress = false;
+      this.isSyncing = false;
+      console.log(`[SyncService] Sync finished.`);
     }
   }
 
-  private async syncOperation(operation: any): Promise<void> {
-    const { type, data } = operation;
-
+  private getEndpointForType(type: string): string | null {
     switch (type) {
-      case 'CREATE_ACCOUNT':
-      case 'UPDATE_ACCOUNT':
-        await apiClient.post('/accounts', data);
-        break;
-      case 'DELETE_ACCOUNT':
-        await apiClient.delete(`/accounts/${data.id}`);
-        break;
-      case 'CREATE_TRANSACTION':
-      case 'UPDATE_TRANSACTION':
-        await apiClient.post('/transactions', data);
-        break;
-      case 'DELETE_TRANSACTION':
-        await apiClient.delete(`/transactions/${data.id}`);
-        break;
-      case 'CREATE_USER':
-        await apiClient.post('/users', data);
-        break;
-      case 'UPDATE_USER':
-        await apiClient.put(`/users/${data.id}`, data);
-        break;
-      case 'DELETE_USER':
-        await apiClient.delete(`/users/${data.id}`);
-        break;
-      default:
-        console.warn(`[SyncService] Unknown operation type: ${type}`);
+      case 'SAVE_STATE': return '/sync/state';
+      case 'CREATE_ACCOUNT': return '/accounts';
+      case 'CREATE_TRANSACTION': return '/transactions';
+      case 'UPDATE_SETTINGS': return '/settings';
+      default: return null;
     }
   }
 
-  getSyncStatus(): { isOnline: boolean; syncInProgress: boolean; pendingOperations: number } {
-    return {
-      isOnline: this.isOnline,
-      syncInProgress: this.syncInProgress,
-      pendingOperations: 0,
+  async getSyncStatus() {
+    const pending = await offlineStorage.getPendingOperations();
+    const unsyncedCount = pending.filter(op => !op.synced).length;
+    return { 
+      pending: unsyncedCount, 
+      lastSync: new Date().toISOString(),
+      isSyncing: this.isSyncing
     };
   }
 }

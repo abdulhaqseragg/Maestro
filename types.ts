@@ -121,6 +121,9 @@ export interface UserPermissions {
 export interface UserSettings {
   currency: string;
   language: string;
+  pin?: string;
+  isPinEnabled?: boolean;
+  isPrivacyMode?: boolean;
 }
 
 export interface User {

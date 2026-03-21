@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { FinanceState, Account, AccountType, CreditCardSettings } from '../types';
 import { Plus, Pencil, Trash2, X, CreditCard, Banknote, Landmark, Smartphone, MoreVertical } from 'lucide-react';
-import { financeLogic } from '../services/financeLogic';
+import { financeLogic } from '../src/services/financeLogic';
 import { translations } from '../translations';
 
 interface AccountsProps {
@@ -151,7 +151,7 @@ const Accounts: React.FC<AccountsProps> = ({ state, updateState }) => {
                 <div>
                   <p className="text-xs text-slate-500 mb-0.5">{t.accounts.currentBalance}</p>
                   <p className="text-2xl font-bold text-slate-900">
-                    {financeLogic.formatCurrency(account.balance, state.settings.currency, state.settings.language)}
+                    {financeLogic.formatCurrency(account.balance, state.settings.currency, state.settings.language, state.settings.isPrivacyMode)}
                   </p>
                 </div>
               </div>

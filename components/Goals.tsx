@@ -6,7 +6,7 @@ import {
   RotateCcw, Pencil, Trash2, CheckCircle2, 
   AlertCircle, LayoutList, History
 } from 'lucide-react';
-import { financeLogic } from '../services/financeLogic';
+import { financeLogic } from '../src/services/financeLogic';
 import { translations } from '../translations';
 
 interface GoalsProps {
@@ -225,11 +225,11 @@ const Goals: React.FC<GoalsProps> = ({ state, updateState }) => {
                 <div className="flex justify-between items-end">
                   <div>
                     <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-1">{t.common.current}</p>
-                    <p className="text-2xl font-black text-slate-900">{financeLogic.formatCurrency(currentProgress, state.settings.currency, lang)}</p>
+                    <p className="text-2xl font-black text-slate-900">{financeLogic.formatCurrency(currentProgress, state.settings.currency, lang, state.settings.isPrivacyMode)}</p>
                   </div>
                   <div className={`${isRTL ? 'text-left' : 'text-right'}`}>
                     <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-1">{t.common.target}</p>
-                    <p className="text-lg font-bold text-slate-500">{financeLogic.formatCurrency(goal.targetAmount, state.settings.currency, lang)}</p>
+                    <p className="text-lg font-bold text-slate-500">{financeLogic.formatCurrency(goal.targetAmount, state.settings.currency, lang, state.settings.isPrivacyMode)}</p>
                   </div>
                 </div>
 

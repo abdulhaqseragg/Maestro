@@ -120,7 +120,16 @@ export const translations: any = {
       recentTransactions: "Recent Transactions",
       viewAll: "View All",
       noBills: "No upcoming bills",
-      aiMessage: "You've spent 85% of your Dining budget. You might want to cook at home more this week."
+      aiMessage: "You've spent 85% of your Dining budget. You might want to cook at home more this week.",
+      healthScore: "Health Score",
+      healthExcellent: "Excellent",
+      healthStable: "Stable",
+      healthCritical: "Critical",
+      aiAnalysisStatus: "AI Analysis Status",
+      aiReady: "System Ready",
+      weeklyCashFlow: "Weekly Cash Flow",
+      expenseBreakdown: "Expense Breakdown",
+      top5: "Top 5"
     },
     accounts: {
       title: "Your Accounts",
@@ -295,6 +304,20 @@ export const translations: any = {
       deleteCategoryError: "Cannot delete a main category that has sub-categories.",
       incomeCategories: "Income Categories",
       expenseCategories: "Expense Categories"
+    },
+    security: {
+      title: "Security & PIN",
+      enablePin: "Enable 6-Digit PIN",
+      disablePin: "Disable PIN Protection",
+      setPin: "Set 6-Digit PIN",
+      changePin: "Change Security PIN",
+      pinPlaceholder: "Enter 6 digits",
+      pinSetSuccess: "Security PIN set successfully",
+      pinDisabledSuccess: "PIN protection disabled",
+      pinMismatch: "PINs do not match",
+      enterPin: "Enter PIN",
+      confirmPin: "Confirm PIN",
+      setupPin: "Setup Security PIN"
     }
   },
   ar: {
@@ -417,7 +440,16 @@ export const translations: any = {
       recentTransactions: "المعاملات الأخيرة",
       viewAll: "عرض الكل",
       noBills: "لا توجد فواتير قادمة",
-      aiMessage: "لقد أنفقت 85٪ من ميزانية الطعام. قد ترغب في الطهي في المنزل أكثر هذا الأسبوع."
+      aiMessage: "لقد أنفقت 85٪ من ميزانية الطعام. قد ترغب في الطهي في المنزل أكثر هذا الأسبوع.",
+      healthScore: "مؤشر الصحة",
+      healthExcellent: "ممتاز",
+      healthStable: "مستقر",
+      healthCritical: "حرج",
+      aiAnalysisStatus: "حالة التحليل الذكي",
+      aiReady: "النظام جاهز",
+      weeklyCashFlow: "التدفق النقدي الأسبوعي",
+      expenseBreakdown: "تحليل المصاريف",
+      top5: "أعلى 5"
     },
     accounts: {
       title: "حساباتك",
@@ -592,6 +624,20 @@ export const translations: any = {
       deleteCategoryError: "لا يمكن حذف فئة رئيسية تحتوي على فئات فرعية.",
       incomeCategories: "فئات الدخل",
       expenseCategories: "فئات المصاريف"
+    },
+    security: {
+      title: "الأمان والرقم السري",
+      enablePin: "تفعيل الرقم السري (6 أرقام)",
+      disablePin: "تعطيل حماية الرقم السري",
+      setPin: "تعيين الرقم السري",
+      changePin: "تغيير الرقم السري",
+      pinPlaceholder: "أدخل 6 أرقام",
+      pinSetSuccess: "تم تعيين الرقم السري بنجاح",
+      pinDisabledSuccess: "تم تعطيل حماية الرقم السري",
+      pinMismatch: "الأرقام غير متطابقة",
+      enterPin: "أدخل الرقم السري",
+      confirmPin: "تأكيد الرقم السري",
+      setupPin: "إعداد الرقم السري"
     }
   }
 };

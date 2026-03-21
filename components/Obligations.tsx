@@ -8,7 +8,7 @@ import {
   Link as LinkIcon, AlertCircle, Archive, LayoutList,
   Pencil, Trash2, Wallet, Landmark
 } from 'lucide-react';
-import { financeLogic } from '../services/financeLogic';
+import { financeLogic } from '../src/services/financeLogic';
 import { translations } from '../translations';
 
 interface ObligationsProps {
@@ -414,7 +414,7 @@ const Obligations: React.FC<ObligationsProps> = ({ state, updateState }) => {
         <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm flex items-center justify-between">
           <div>
             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">{t.obligations.totalDebt}</p>
-            <p className="text-2xl font-black text-rose-600">{financeLogic.formatCurrency(summaryStats.totalPayableRemaining, state.settings.currency, lang)}</p>
+            <p className="text-2xl font-black text-rose-600">{financeLogic.formatCurrency(summaryStats.totalPayableRemaining, state.settings.currency, lang, state.settings.isPrivacyMode)}</p>
           </div>
           <div className="p-3 bg-rose-50 text-rose-600 rounded-2xl">
             <ArrowUpRight size={24} />
@@ -423,7 +423,7 @@ const Obligations: React.FC<ObligationsProps> = ({ state, updateState }) => {
         <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm flex items-center justify-between">
           <div>
             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">{t.obligations.totalReceivable}</p>
-            <p className="text-2xl font-black text-emerald-600">{financeLogic.formatCurrency(summaryStats.totalReceivableRemaining, state.settings.currency, lang)}</p>
+            <p className="text-2xl font-black text-emerald-600">{financeLogic.formatCurrency(summaryStats.totalReceivableRemaining, state.settings.currency, lang, state.settings.isPrivacyMode)}</p>
           </div>
           <div className="p-3 bg-emerald-50 text-emerald-600 rounded-2xl">
             <ArrowDownLeft size={24} />
@@ -512,13 +512,13 @@ const Obligations: React.FC<ObligationsProps> = ({ state, updateState }) => {
                 <div className="space-y-4">
                   <div className="bg-rose-50/50 p-3 rounded-2xl border border-rose-100/50">
                     <p className="text-[10px] text-rose-600 font-bold uppercase tracking-widest mb-1">{t.obligations.remainingBalance}</p>
-                    <p className="text-xl font-black text-rose-900">{financeLogic.formatCurrency(payable.remainingBalance, state.settings.currency, lang)}</p>
+                    <p className="text-xl font-black text-rose-900">{financeLogic.formatCurrency(payable.remainingBalance, state.settings.currency, lang, state.settings.isPrivacyMode)}</p>
                   </div>
 
                   <div className="space-y-1">
                     <div className="flex justify-between text-[10px] font-bold uppercase text-slate-400">
                       <span>{Math.round(progress)}% {t.common.achieved}</span>
-                      <span>{financeLogic.formatCurrency(payable.totalAmount, state.settings.currency, lang)} {t.common.total}</span>
+                      <span>{financeLogic.formatCurrency(payable.totalAmount, state.settings.currency, lang, state.settings.isPrivacyMode)} {t.common.total}</span>
                     </div>
                     <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
                       <div className={`h-full rounded-full transition-all duration-700 ${payable.remainingBalance <= 0 ? 'bg-emerald-500' : 'bg-rose-500'}`} style={{ width: `${progress}%` }} />
@@ -533,7 +533,7 @@ const Obligations: React.FC<ObligationsProps> = ({ state, updateState }) => {
                           <span className="text-xs font-semibold text-slate-700">{inst.dueDate}</span>
                         </div>
                         <div className="flex items-center gap-3">
-                          <span className="text-sm font-bold text-slate-900">{financeLogic.formatCurrency(inst.amount, state.settings.currency, lang)}</span>
+                          <span className="text-sm font-bold text-slate-900">{financeLogic.formatCurrency(inst.amount, state.settings.currency, lang, state.settings.isPrivacyMode)}</span>
                           {inst.status === 'PAID' ? (
                             <CheckCircle2 size={18} className="text-emerald-500" />
                           ) : (
@@ -595,13 +595,13 @@ const Obligations: React.FC<ObligationsProps> = ({ state, updateState }) => {
                 <div className="space-y-6">
                   <div className="bg-emerald-50/50 p-3 rounded-2xl border border-emerald-100/50">
                     <p className="text-[10px] text-emerald-600 font-bold uppercase tracking-widest mb-1">{t.obligations.balanceToCollect}</p>
-                    <p className="text-xl font-black text-emerald-900">{financeLogic.formatCurrency(receivable.remainingBalance, state.settings.currency, lang)}</p>
+                    <p className="text-xl font-black text-emerald-900">{financeLogic.formatCurrency(receivable.remainingBalance, state.settings.currency, lang, state.settings.isPrivacyMode)}</p>
                   </div>
 
                   <div className="space-y-2">
                     <div className="flex items-center justify-between text-[10px] font-bold uppercase text-slate-400">
                       <span>{Math.round(progress)}% {t.common.achieved}</span>
-                      <span>{financeLogic.formatCurrency(receivable.amount, state.settings.currency, lang)} {t.common.total}</span>
+                      <span>{financeLogic.formatCurrency(receivable.amount, state.settings.currency, lang, state.settings.isPrivacyMode)} {t.common.total}</span>
                     </div>
                     <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
                       <div 
@@ -620,7 +620,7 @@ const Obligations: React.FC<ObligationsProps> = ({ state, updateState }) => {
                         {receivable.history.map((h, i) => (
                           <div key={i} className="flex justify-between text-[10px] p-2 bg-slate-50 rounded-lg">
                             <span className="text-slate-500">{h.date}</span>
-                            <span className="font-bold text-emerald-600">+{financeLogic.formatCurrency(h.amount, state.settings.currency, lang)}</span>
+                            <span className="font-bold text-emerald-600">+{financeLogic.formatCurrency(h.amount, state.settings.currency, lang, state.settings.isPrivacyMode)}</span>
                           </div>
                         ))}
                       </div>
@@ -657,10 +657,10 @@ const Obligations: React.FC<ObligationsProps> = ({ state, updateState }) => {
 
       {/* Main Creation/Editing Modal */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
           <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setIsModalOpen(false)} />
-          <div className="relative bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
-            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+          <div className="relative bg-white rounded-t-[2.5rem] sm:rounded-3xl shadow-2xl w-full max-w-md overflow-hidden animate-in slide-in-from-bottom sm:zoom-in duration-300">
+            <div className="px-8 py-6 border-b border-slate-100 flex items-center justify-between bg-slate-50">
               <h3 className="text-lg font-bold text-slate-900">
                 {modalType === 'PAYABLE' 
                   ? (editingId ? t.obligations.editPayable : t.obligations.addNewPayable) 
@@ -670,7 +670,7 @@ const Obligations: React.FC<ObligationsProps> = ({ state, updateState }) => {
                 <X size={20} />
               </button>
             </div>
-            <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
+            <div className="p-8 space-y-4 max-h-[85vh] sm:max-h-[70vh] overflow-y-auto custom-scrollbar">
               {modalType === 'PAYABLE' ? (
                 <>
                   <div className="space-y-1">
@@ -795,56 +795,56 @@ const Obligations: React.FC<ObligationsProps> = ({ state, updateState }) => {
 
       {/* Payment Confirmation Modal */}
       {isPayConfirmModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
           <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setIsPayConfirmModalOpen(false)} />
-          <div className="relative bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden animate-in fade-in zoom-in duration-200">
-            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+          <div className="relative bg-white rounded-t-[2.5rem] sm:rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden animate-in slide-in-from-bottom sm:zoom-in duration-300">
+            <div className="px-8 py-6 border-b border-slate-100 flex items-center justify-between bg-slate-50">
               <h3 className="text-sm font-bold text-slate-900">{activeInstallment ? t.obligations.pay : t.obligations.payFull}</h3>
               <button onClick={() => setIsPayConfirmModalOpen(false)} className="text-slate-400 hover:text-slate-600">
                 <X size={18} />
               </button>
             </div>
-            <div className="p-6 space-y-4">
-               <div className="p-3 bg-rose-50 rounded-xl text-center">
-                  <p className="text-[10px] text-rose-600 font-bold uppercase mb-1">{t.obligations.remainingBalance}</p>
-                  <p className="text-lg font-black text-rose-900">
-                    {financeLogic.formatCurrency(activeInstallment ? activeInstallment.amount : activePayable?.remainingBalance || 0, state.settings.currency, lang)}
+            <div className="p-8 space-y-4">
+               <div className="p-5 bg-rose-50 rounded-2xl text-center border border-rose-100/50">
+                  <p className="text-[10px] text-rose-600 font-bold uppercase mb-1 tracking-widest">{t.obligations.remainingBalance}</p>
+                  <p className="text-2xl font-black text-rose-900">
+                    {financeLogic.formatCurrency(activeInstallment ? activeInstallment.amount : activePayable?.remainingBalance || 0, state.settings.currency, lang, state.settings.isPrivacyMode)}
                   </p>
                </div>
                
-               <div className="space-y-1">
-                <label className="text-xs font-bold text-slate-500 uppercase">{t.common.amount}</label>
+               <div className="space-y-1.5">
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-1">{t.common.amount}</label>
                 <input 
                   type="number" 
                   value={paymentAmount}
                   onChange={e => setPaymentAmount(Number(e.target.value))}
                   max={activeInstallment ? activeInstallment.amount : activePayable?.remainingBalance}
-                  className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-rose-500 text-sm"
+                  className="w-full px-5 py-3.5 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:ring-4 focus:ring-slate-100 text-sm font-bold"
                 />
               </div>
 
-               <div className="space-y-1">
-                <label className="text-xs font-bold text-slate-500 uppercase">{t.obligations.selectPaymentAccount}</label>
+               <div className="space-y-1.5">
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-1">{t.obligations.selectPaymentAccount}</label>
                 <select 
                   value={selectedAccountId}
                   onChange={e => setSelectedAccountId(e.target.value)}
-                  className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-rose-500 text-sm"
+                  className="w-full px-5 py-3.5 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:ring-4 focus:ring-slate-100 text-sm font-bold"
                 >
                   <option value="">{t.transactions.selectAccount}</option>
                   {paymentAccounts.map(acc => (
-                    <option key={acc.id} value={acc.id}>{acc.name} ({financeLogic.formatCurrency(acc.balance, state.settings.currency, lang)})</option>
+                    <option key={acc.id} value={acc.id}>{acc.name} ({financeLogic.formatCurrency(acc.balance, state.settings.currency, lang, state.settings.isPrivacyMode)})</option>
                   ))}
                 </select>
               </div>
             </div>
-            <div className="p-4 bg-slate-50 flex gap-2">
-              <button onClick={() => setIsPayConfirmModalOpen(false)} className="flex-1 py-2 text-xs font-bold text-slate-600 bg-white border border-slate-200 rounded-xl">
+            <div className="p-8 bg-slate-50 flex gap-4">
+              <button onClick={() => setIsPayConfirmModalOpen(false)} className="flex-1 py-4 text-[10px] font-bold text-slate-500 bg-white border border-slate-100 rounded-2xl hover:bg-slate-50 btn-interaction uppercase tracking-widest">
                 {t.common.cancel}
               </button>
               <button 
                 onClick={activeInstallment ? handlePayInstallment : handlePayFullPayable} 
                 disabled={!selectedAccountId || paymentAmount <= 0}
-                className="flex-1 py-2 text-xs font-bold text-white bg-slate-900 rounded-xl hover:bg-slate-800 shadow-sm disabled:opacity-50"
+                className="flex-1 py-4 text-[10px] font-bold text-white bg-slate-900 rounded-2xl hover:bg-black shadow-xl shadow-slate-100 btn-interaction disabled:opacity-50 uppercase tracking-widest"
               >
                 {t.common.save}
               </button>
@@ -855,63 +855,63 @@ const Obligations: React.FC<ObligationsProps> = ({ state, updateState }) => {
 
       {/* Collection Modal */}
       {isPartialModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
           <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setIsPartialModalOpen(false)} />
-          <div className="relative bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden animate-in fade-in zoom-in duration-200">
-            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+          <div className="relative bg-white rounded-t-[2.5rem] sm:rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden animate-in slide-in-from-bottom sm:zoom-in duration-300">
+            <div className="px-8 py-6 border-b border-slate-100 flex items-center justify-between bg-slate-50">
               <h3 className="text-sm font-bold text-slate-900">{t.obligations.recordPayment}</h3>
               <button onClick={() => setIsPartialModalOpen(false)} className="text-slate-400 hover:text-slate-600">
                 <X size={18} />
               </button>
             </div>
-            <div className="p-6 space-y-4">
-               <div className="p-3 bg-emerald-50 rounded-xl text-center">
-                  <p className="text-[10px] text-emerald-600 font-bold uppercase mb-1">{t.obligations.balanceToCollect}</p>
-                  <p className="text-lg font-black text-emerald-900">{financeLogic.formatCurrency(activeReceivable?.remainingBalance || 0, state.settings.currency, lang)}</p>
+            <div className="p-8 space-y-4">
+               <div className="p-5 bg-emerald-50 rounded-2xl text-center border border-emerald-100/50">
+                  <p className="text-[10px] text-emerald-600 font-bold uppercase mb-1 tracking-widest">{t.obligations.balanceToCollect}</p>
+                  <p className="text-2xl font-black text-emerald-900">{financeLogic.formatCurrency(activeReceivable?.remainingBalance || 0, state.settings.currency, lang, state.settings.isPrivacyMode)}</p>
                </div>
                
-               <div className="space-y-1">
-                <label className="text-xs font-bold text-slate-500 uppercase">{t.obligations.amountToCollect}</label>
+               <div className="space-y-1.5">
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-1">{t.obligations.amountToCollect}</label>
                 <input 
                   type="number" 
                   value={partialAmount}
                   onChange={e => setPartialAmount(Number(e.target.value))}
-                  className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 text-sm"
+                  className="w-full px-5 py-3.5 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:ring-4 focus:ring-slate-100 text-sm font-bold"
                 />
               </div>
 
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-slate-500 uppercase">{t.obligations.selectCollectAccount}</label>
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-1">{t.obligations.selectCollectAccount}</label>
                 <select 
                   value={selectedAccountId}
                   onChange={e => setSelectedAccountId(e.target.value)}
-                  className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 text-sm outline-none"
+                  className="w-full px-5 py-3.5 bg-slate-50 border border-slate-100 rounded-2xl focus:ring-4 focus:ring-slate-100 text-sm font-bold outline-none"
                 >
                   <option value="">{t.transactions.selectAccount}</option>
                   {collectionAccounts.map(acc => (
-                    <option key={acc.id} value={acc.id}>{acc.name} ({financeLogic.formatCurrency(acc.balance, state.settings.currency, lang)})</option>
+                    <option key={acc.id} value={acc.id}>{acc.name} ({financeLogic.formatCurrency(acc.balance, state.settings.currency, lang, state.settings.isPrivacyMode)})</option>
                   ))}
                 </select>
               </div>
 
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-slate-500 uppercase">{t.obligations.dueDateOptional}</label>
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-1">{t.obligations.dueDateOptional}</label>
                 <input 
                   type="date" 
                   value={rescheduleDate}
                   onChange={e => setRescheduleDate(e.target.value)}
-                  className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl outline-none text-sm"
+                  className="w-full px-5 py-3.5 bg-slate-50 border border-slate-100 rounded-2xl outline-none text-sm font-bold"
                 />
               </div>
             </div>
-            <div className="p-4 bg-slate-50 flex gap-2">
-              <button onClick={() => setIsPartialModalOpen(false)} className="flex-1 py-2 text-xs font-bold text-slate-600 bg-white border border-slate-200 rounded-xl">
+            <div className="p-8 bg-slate-50 flex gap-4">
+              <button onClick={() => setIsPartialModalOpen(false)} className="flex-1 py-4 text-[10px] font-bold text-slate-500 bg-white border border-slate-100 rounded-2xl hover:bg-slate-50 btn-interaction uppercase tracking-widest">
                 {t.common.cancel}
               </button>
               <button 
                 onClick={handlePartialCollection} 
                 disabled={!selectedAccountId || partialAmount <= 0}
-                className="flex-1 py-2 text-xs font-bold text-white bg-emerald-600 rounded-xl hover:bg-emerald-700 shadow-sm disabled:opacity-50"
+                className="flex-1 py-4 text-[10px] font-bold text-white bg-emerald-600 rounded-2xl hover:bg-emerald-700 shadow-xl shadow-emerald-100 btn-interaction disabled:opacity-50 uppercase tracking-widest"
               >
                 {t.common.save}
               </button>
