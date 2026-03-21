@@ -1,89 +1,83 @@
-
+/**
+ * Storage Service — Self-hosted Backend version
+ * Removes all Supabase dependencies.
+ * Strategy: localStorage + IndexedDB (offline) → backend API (online sync)
+ */
 import { FinanceState } from '../types';
 import { offlineStorage } from '../src/services/offlineStorage';
 import { syncService } from '../src/services/syncService';
-import { supabase } from '../src/services/supabaseClient';
 import { authService } from '../src/services/authService';
+import { apiClient } from '../src/services/apiClient';
 
-const STORAGE_KEY = 'finance_flow_data';
+const STORAGE_KEY = 'maestro_finance_data';
 
 export const storageService = {
+
+  // ── Save state ──────────────────────────────────────────────
   save: async (data: FinanceState) => {
     try {
-      // Always save to local storage as backup
+      // Always persist locally first (instant + offline-safe)
       localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
       await offlineStorage.cacheData('financeState', data, 'app-state');
 
-      // Check if user is authenticated
+      // If the user is authenticated and online, queue a background sync
       const { data: { user } } = await authService.getCurrentUser();
-
       if (user && syncService.isDeviceOnline()) {
-        // Sync accounts and transactions to Supabase
-        console.log('[StorageService] Syncing data to Supabase for user:', user.id);
-
-        // Sync accounts
+        // Sync accounts to backend (upsert strategy)
         for (const account of data.accounts) {
           await syncService.storePendingOperation('CREATE_ACCOUNT', { ...account, user_id: user.id });
         }
-
-        // Sync transactions
+        // Sync transactions to backend
         for (const transaction of data.transactions) {
           await syncService.storePendingOperation('CREATE_TRANSACTION', { ...transaction, user_id: user.id });
         }
       }
-
-      console.log('[StorageService] Data saved successfully');
     } catch (error) {
       console.error('[StorageService] Failed to save data:', error);
-      // Fallback to localStorage only
+      // Fallback: at minimum, always save to localStorage
       localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
     }
   },
 
+  // ── Load state ──────────────────────────────────────────────
   load: async (): Promise<FinanceState | null> => {
     try {
-      // Check if user is authenticated
       const { data: { user } } = await authService.getCurrentUser();
 
-      if (user) {
-        // Load from Supabase for authenticated users
-        console.log('[StorageService] Loading data from Supabase for user:', user.id);
+      if (user && syncService.isDeviceOnline()) {
+        // Load fresh data from backend for authenticated users
+        try {
+          const [accountsRes, transactionsRes] = await Promise.all([
+            apiClient.get<{ accounts: any[] }>('/accounts'),
+            apiClient.get<{ transactions: any[] }>('/transactions'),
+          ]);
 
-        const [accountsRes, transactionsRes] = await Promise.all([
-          supabase.from('accounts').select('*').eq('user_id', user.id),
-          supabase.from('transactions').select('*').eq('user_id', user.id)
-        ]);
-
-        if (accountsRes.error || transactionsRes.error) {
-          console.error('[StorageService] Failed to load from Supabase:', accountsRes.error || transactionsRes.error);
-          // Fallback to local storage
-        } else {
           const cloudData: FinanceState = {
-            users: [], // Will be loaded separately
-            accounts: accountsRes.data || [],
-            transactions: transactionsRes.data || [],
-            payables: [],
-            receivables: [],
-            budgets: [],
-            goals: [],
-            categories: [],
-            globalSettings: {},
-            notifications: []
+            users:           [],
+            accounts:        accountsRes.accounts  || [],
+            transactions:    transactionsRes.transactions || [],
+            payables:        [],
+            receivables:     [],
+            budgets:         [],
+            goals:           [],
+            categories:      [],
+            globalSettings:  { language: (user.settings as any)?.language ?? 'en' },
           };
 
-          // Cache in IndexedDB for offline use
+          // Cache locally for offline use
           await offlineStorage.cacheData('financeState', cloudData, 'app-state');
           return cloudData;
+        } catch (apiErr) {
+          console.warn('[StorageService] Backend unavailable, falling back to local cache:', apiErr);
         }
       }
 
-      // For non-authenticated users or fallback, load from IndexedDB/localStorage
-      let data = await offlineStorage.getCachedData('financeState');
+      // Offline / unauthenticated: load from IndexedDB → localStorage
+      let data = await offlineStorage.getCachedData('financeState') as FinanceState | null;
 
       if (!data) {
-        const localData = localStorage.getItem(STORAGE_KEY);
-        data = localData ? JSON.parse(localData) : null;
-
+        const localRaw = localStorage.getItem(STORAGE_KEY);
+        data = localRaw ? JSON.parse(localRaw) : null;
         if (data) {
           await offlineStorage.cacheData('financeState', data, 'app-state');
         }
@@ -92,42 +86,34 @@ export const storageService = {
       return data;
     } catch (error) {
       console.error('[StorageService] Failed to load data:', error);
-      const data = localStorage.getItem(STORAGE_KEY);
-      return data ? JSON.parse(data) : null;
+      const raw = localStorage.getItem(STORAGE_KEY);
+      return raw ? JSON.parse(raw) : null;
     }
   },
 
+  // ── Load single user's data from backend ─────────────────────
   loadUserData: async (userId: string): Promise<FinanceState | null> => {
-    try {
-      console.log('[StorageService] Loading user data from Supabase for user:', userId);
+    if (!syncService.isDeviceOnline()) return null;
 
-      const [userRes, accountsRes, transactionsRes] = await Promise.all([
-        supabase.from('users').select('*').eq('id', userId).single(),
-        supabase.from('accounts').select('*').eq('user_id', userId),
-        supabase.from('transactions').select('*').eq('user_id', userId)
+    try {
+      const [accountsRes, transactionsRes] = await Promise.all([
+        apiClient.get<{ accounts: any[] }>('/accounts'),
+        apiClient.get<{ transactions: any[] }>('/transactions'),
       ]);
 
-      if (userRes.error || accountsRes.error || transactionsRes.error) {
-        console.error('[StorageService] Failed to load user data:', userRes.error || accountsRes.error || transactionsRes.error);
-        return null;
-      }
-
       const userData: FinanceState = {
-        users: [userRes.data],
-        accounts: accountsRes.data || [],
-        transactions: transactionsRes.data || [],
-        payables: [],
-        receivables: [],
-        budgets: [],
-        goals: [],
-        categories: [],
-        globalSettings: {},
-        notifications: []
+        users:          [],
+        accounts:       accountsRes.accounts       || [],
+        transactions:   transactionsRes.transactions || [],
+        payables:       [],
+        receivables:    [],
+        budgets:        [],
+        goals:          [],
+        categories:     [],
+        globalSettings: { language: 'en' },
       };
 
-      // Cache locally for offline use
       await offlineStorage.cacheData('financeState', userData, 'app-state');
-
       return userData;
     } catch (error) {
       console.error('[StorageService] Failed to load user data:', error);
@@ -135,16 +121,12 @@ export const storageService = {
     }
   },
 
-  // Enhanced methods for offline support
+  // ── Pending operations helpers ───────────────────────────────
   savePendingOperation: async (type: string, data: any) => {
-    return await syncService.storePendingOperation(type, data);
+    return syncService.storePendingOperation(type, data);
   },
 
-  getSyncStatus: () => {
-    return syncService.getSyncStatus();
-  },
+  getSyncStatus: () => syncService.getSyncStatus(),
 
-  forceSync: async () => {
-    await syncService.syncPendingData();
-  }
+  forceSync: async () => syncService.syncPendingData(),
 };

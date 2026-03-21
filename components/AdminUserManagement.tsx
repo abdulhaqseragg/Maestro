@@ -1,347 +1,486 @@
 import React, { useState, useEffect } from 'react';
 import { User, FinanceState } from '../types';
 import { translations } from '../translations';
-import { authService } from '../src/services/authService';
-import { supabase } from '../src/services/supabaseClient';
-import { Plus, Users, Trash2, UserCheck, UserX, Shield, ShieldCheck } from 'lucide-react';
+import { apiClient } from '../src/services/apiClient';
+import {
+  Plus, Users, Trash2, UserCheck, UserX, Shield, Edit2,
+  Key, CheckCircle, XCircle, RefreshCw
+} from 'lucide-react';
 
 interface AdminUserManagementProps {
   state: FinanceState & { notify: (msg: string, type: any) => void };
   updateState: (updater: (prev: FinanceState) => FinanceState) => void;
 }
 
-interface UserWithRole extends User {
-  role: string;
+interface ManagedUser {
+  id: string;
+  email: string;
+  username: string;
+  role: 'ADMIN' | 'USER' | 'VIEWER';
+  permissions: Record<string, boolean>;
+  settings: { currency: string; language: string };
+  expiration_date: string | null;
+  is_active: boolean;
   created_at: string;
 }
 
-const AdminUserManagement: React.FC<AdminUserManagementProps> = ({ state, updateState }) => {
+const DEFAULT_PERMISSIONS = {
+  dashboard: true, accounts: true, transactions: true,
+  obligations: true, budgets: true, goals: true, ai: true, settings: true,
+};
+
+const AdminUserManagement: React.FC<AdminUserManagementProps> = ({ state }) => {
   const lang = state.globalSettings?.language || 'en';
   const t = translations[lang];
 
-  const [users, setUsers] = useState<UserWithRole[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [users, setUsers]               = useState<ManagedUser[]>([]);
+  const [loading, setLoading]           = useState(true);
+  const [showCreateForm, setShowCreate] = useState(false);
+  const [editingUser, setEditingUser]   = useState<ManagedUser | null>(null);
+  const [submitting, setSubmitting]     = useState(false);
+
   const [newUser, setNewUser] = useState({
-    email: '',
-    password: '',
-    username: '',
-    role: 'USER'
+    email: '', password: '', username: '', role: 'USER',
+    expirationDate: '', permissions: { ...DEFAULT_PERMISSIONS },
   });
-  const [creating, setCreating] = useState(false);
 
-  useEffect(() => {
-    loadUsers();
-  }, []);
+  const [editForm, setEditForm] = useState({
+    username: '', role: 'USER', password: '',
+    expirationDate: '', isActive: true,
+    permissions: { ...DEFAULT_PERMISSIONS },
+  });
 
+  // ─── Load users ──────────────────────────────────────────────
   const loadUsers = async () => {
+    setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('users')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-      setUsers(data || []);
-    } catch (error: any) {
-      state.notify(`Failed to load users: ${error.message}`, 'error');
+      const data = await apiClient.get<{ users: ManagedUser[] }>('/users');
+      setUsers(data.users || []);
+    } catch (err: any) {
+      state.notify(`Failed to load users: ${err.message}`, 'ERROR');
     } finally {
       setLoading(false);
     }
   };
 
+  useEffect(() => { loadUsers(); }, []);
+
+  // ─── Create user ─────────────────────────────────────────────
   const createUser = async (e: React.FormEvent) => {
     e.preventDefault();
-    setCreating(true);
-
+    setSubmitting(true);
     try {
-      // Create user in Supabase Auth first
-      const { data: authData, error: authError } = await supabase.auth.admin.createUser({
-        email: newUser.email,
-        password: newUser.password,
-        user_metadata: {
-          username: newUser.username
-        },
-        email_confirm: true // Auto-confirm email
+      await apiClient.post('/users', {
+        email:          newUser.email,
+        password:       newUser.password,
+        username:       newUser.username,
+        role:           newUser.role,
+        expirationDate: newUser.expirationDate || null,
+        permissions:    newUser.permissions,
       });
-
-      if (authError) {
-        console.error('Auth creation error:', authError);
-        // If admin API fails, try regular signup (for development)
-        const { data: signupData, error: signupError } = await supabase.auth.signUp({
-          email: newUser.email,
-          password: newUser.password,
-          options: {
-            data: {
-              username: newUser.username
-            }
-          }
-        });
-
-        if (signupError) throw signupError;
-
-        // For regular signup, we'll need to manually create the user record
-        // and set the role later
-        state.notify('User created successfully. They will need to verify their email before logging in.', 'success');
-        setNewUser({ email: '', password: '', username: '', role: 'USER' });
-        setShowCreateForm(false);
-        loadUsers();
-        return;
-      }
-
-      // Create user record in our users table
-      const { error: userError } = await supabase
-        .from('users')
-        .insert({
-          id: authData.user.id,
-          email: newUser.email,
-          username: newUser.username,
-          role: newUser.role
-        });
-
-      if (userError) throw userError;
-
-      state.notify('User created successfully', 'success');
-      setNewUser({ email: '', password: '', username: '', role: 'USER' });
-      setShowCreateForm(false);
+      state.notify('User created successfully', 'SUCCESS');
+      setNewUser({ email: '', password: '', username: '', role: 'USER', expirationDate: '', permissions: { ...DEFAULT_PERMISSIONS } });
+      setShowCreate(false);
       loadUsers();
-    } catch (error: any) {
-      console.error('User creation error:', error);
-      state.notify(`Failed to create user: ${error.message}`, 'error');
+    } catch (err: any) {
+      state.notify(`Failed to create user: ${err.message}`, 'ERROR');
     } finally {
-      setCreating(false);
+      setSubmitting(false);
     }
   };
 
-  const toggleUserStatus = async (userId: string, currentRole: string) => {
+  // ─── Update user ─────────────────────────────────────────────
+  const updateUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingUser) return;
+    setSubmitting(true);
     try {
-      const newRole = currentRole === 'ADMIN' ? 'USER' : 'ADMIN';
-
-      const { error } = await supabase
-        .from('users')
-        .update({ role: newRole })
-        .eq('id', userId);
-
-      if (error) throw error;
-
-      state.notify(`User role updated to ${newRole}`, 'success');
+      await apiClient.put(`/users/${editingUser.id}`, {
+        username:       editForm.username,
+        role:           editForm.role,
+        password:       editForm.password || undefined,
+        expirationDate: editForm.expirationDate || null,
+        isActive:       editForm.isActive,
+        permissions:    editForm.permissions,
+      });
+      state.notify('User updated successfully', 'SUCCESS');
+      setEditingUser(null);
       loadUsers();
-    } catch (error: any) {
-      state.notify(`Failed to update user: ${error.message}`, 'error');
+    } catch (err: any) {
+      state.notify(`Failed to update user: ${err.message}`, 'ERROR');
+    } finally {
+      setSubmitting(false);
     }
   };
 
-  const deleteUser = async (userId: string) => {
-    if (!confirm('Are you sure you want to delete this user? This action cannot be undone.')) {
-      return;
-    }
-
+  // ─── Toggle role ─────────────────────────────────────────────
+  const toggleRole = async (user: ManagedUser) => {
+    const newRole = user.role === 'ADMIN' ? 'USER' : 'ADMIN';
     try {
-      // Delete from our users table
-      const { error: userError } = await supabase
-        .from('users')
-        .delete()
-        .eq('id', userId);
-
-      if (userError) throw userError;
-
-      // Delete from Supabase Auth (this requires admin privileges)
-      const { error: authError } = await supabase.auth.admin.deleteUser(userId);
-      if (authError) {
-        console.warn('Could not delete from auth, but user record removed:', authError);
-      }
-
-      state.notify('User deleted successfully', 'success');
+      await apiClient.put(`/users/${user.id}`, { role: newRole });
+      state.notify(`Role updated to ${newRole}`, 'SUCCESS');
       loadUsers();
-    } catch (error: any) {
-      state.notify(`Failed to delete user: ${error.message}`, 'error');
+    } catch (err: any) {
+      state.notify(`Failed to update role: ${err.message}`, 'ERROR');
     }
   };
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
-      </div>
-    );
-  }
+  // ─── Delete user ─────────────────────────────────────────────
+  const deleteUser = async (user: ManagedUser) => {
+    if (!confirm(`Delete user "${user.username || user.email}"? This cannot be undone.`)) return;
+    try {
+      await apiClient.delete(`/users/${user.id}`);
+      state.notify('User deleted', 'SUCCESS');
+      loadUsers();
+    } catch (err: any) {
+      state.notify(`Failed to delete user: ${err.message}`, 'ERROR');
+    }
+  };
 
+  // ─── Helpers ─────────────────────────────────────────────────
+  const formatDate = (d: string | null) =>
+    d ? new Date(d).toLocaleDateString() : '—';
+
+  const isExpired = (d: string | null) =>
+    d ? new Date(d) < new Date() : false;
+
+  // ─── Render ──────────────────────────────────────────────────
   return (
-    <div className="p-6 max-w-6xl mx-auto">
-      <div className="flex items-center justify-between mb-8">
+    <div className="space-y-8">
+
+      {/* Header */}
+      <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">User Management</h1>
-          <p className="text-gray-600">Manage user accounts and permissions</p>
+          <h2 className="text-3xl font-black text-slate-900">User Management</h2>
+          <p className="text-sm font-bold text-slate-400 mt-1">Manage accounts and permissions</p>
         </div>
-        <button
-          onClick={() => setShowCreateForm(true)}
-          className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition-colors"
-        >
-          <Plus size={20} />
-          Create User
-        </button>
+        <div className="flex gap-3">
+          <button
+            onClick={loadUsers}
+            className="p-3 text-slate-400 hover:bg-slate-50 rounded-2xl transition-colors"
+            title="Refresh"
+          >
+            <RefreshCw size={18} strokeWidth={2.5} />
+          </button>
+          <button
+            onClick={() => setShowCreate(true)}
+            className="flex items-center gap-2 px-5 py-3 bg-slate-900 text-white text-sm font-black uppercase tracking-widest rounded-2xl hover:bg-indigo-950 transition-all shadow-xl shadow-slate-200"
+          >
+            <Plus size={18} strokeWidth={3} /> Create User
+          </button>
+        </div>
       </div>
 
-      {/* Create User Modal */}
-      {showCreateForm && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 w-full max-w-md">
-            <h2 className="text-xl font-bold mb-4">Create New User</h2>
-            <form onSubmit={createUser} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
-                <input
-                  type="email"
-                  required
-                  value={newUser.email}
-                  onChange={(e) => setNewUser({ ...newUser, email: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Username</label>
-                <input
-                  type="text"
-                  required
-                  value={newUser.username}
-                  onChange={(e) => setNewUser({ ...newUser, username: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
-                <input
-                  type="password"
-                  required
-                  value={newUser.password}
-                  onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Role</label>
-                <select
-                  value={newUser.role}
-                  onChange={(e) => setNewUser({ ...newUser, role: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
-                >
-                  <option value="USER">User</option>
-                  <option value="ADMIN">Admin</option>
-                </select>
-              </div>
-              <div className="flex gap-3">
-                <button
-                  type="submit"
-                  disabled={creating}
-                  className="flex-1 bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50"
-                >
-                  {creating ? 'Creating...' : 'Create User'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowCreateForm(false)}
-                  className="flex-1 bg-gray-300 text-gray-700 py-2 rounded-lg hover:bg-gray-400"
-                >
-                  Cancel
-                </button>
-              </div>
-            </form>
-          </div>
+      {/* Users table */}
+      <div className="bg-white rounded-[2rem] border border-slate-100 shadow-sm overflow-hidden">
+        <div className="px-8 py-5 border-b border-slate-100 flex items-center gap-3">
+          <Users size={18} className="text-slate-400" strokeWidth={2.5} />
+          <span className="font-black text-slate-900">
+            {loading ? 'Loading...' : `${users.length} User${users.length !== 1 ? 's' : ''}`}
+          </span>
         </div>
-      )}
 
-      {/* Users Table */}
-      <div className="bg-white rounded-lg shadow overflow-hidden">
-        <div className="px-6 py-4 border-b border-gray-200">
-          <h3 className="text-lg font-medium text-gray-900">Users ({users.length})</h3>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  User
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Role
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Created
-                </th>
-                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {users.map((user) => (
-                <tr key={user.id}>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="flex items-center">
-                      <div className="flex-shrink-0 h-10 w-10">
-                        <div className={`h-10 w-10 rounded-full flex items-center justify-center ${
-                          user.role === 'ADMIN' ? 'bg-purple-500' : 'bg-indigo-500'
-                        }`}>
-                          <span className="text-white font-medium text-sm">
-                            {user.role === 'ADMIN' ? <Shield size={16} /> : user.username?.charAt(0).toUpperCase() || user.email.charAt(0).toUpperCase()}
-                          </span>
+        {loading ? (
+          <div className="flex items-center justify-center h-48">
+            <div className="w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin" />
+          </div>
+        ) : users.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-48 text-slate-400">
+            <Users size={40} strokeWidth={1.5} className="mb-3" />
+            <p className="font-bold text-sm">No users yet</p>
+            <p className="text-xs mt-1">Create your first user above</p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-slate-100">
+                  {['User', 'Role', 'Status', 'Expires', 'Created', 'Actions'].map(h => (
+                    <th key={h} className="px-6 py-4 text-left text-[10px] font-black uppercase tracking-widest text-slate-400">
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-50">
+                {users.map(user => (
+                  <tr key={user.id} className="hover:bg-slate-50/50 transition-colors">
+                    {/* User info */}
+                    <td className="px-6 py-4">
+                      <div className="flex items-center gap-3">
+                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-black text-sm text-white ${user.role === 'ADMIN' ? 'bg-indigo-600' : 'bg-slate-400'}`}>
+                          {user.role === 'ADMIN'
+                            ? <Shield size={16} strokeWidth={2.5} />
+                            : (user.username?.charAt(0) || user.email.charAt(0)).toUpperCase()
+                          }
+                        </div>
+                        <div>
+                          <p className="text-sm font-black text-slate-900">{user.username || '—'}</p>
+                          <p className="text-xs font-semibold text-slate-400">{user.email}</p>
                         </div>
                       </div>
-                      <div className="ml-4">
-                        <div className="text-sm font-medium text-gray-900">{user.username || 'No username'}</div>
-                        <div className="text-sm text-gray-500">{user.email}</div>
+                    </td>
+
+                    {/* Role */}
+                    <td className="px-6 py-4">
+                      <span className={`inline-flex items-center px-3 py-1 rounded-xl text-[10px] font-black uppercase tracking-wider ${
+                        user.role === 'ADMIN'
+                          ? 'bg-indigo-50 text-indigo-700'
+                          : 'bg-slate-100 text-slate-600'
+                      }`}>
+                        {user.role}
+                      </span>
+                    </td>
+
+                    {/* Status */}
+                    <td className="px-6 py-4">
+                      <span className={`inline-flex items-center gap-1.5 text-xs font-bold ${user.is_active ? 'text-emerald-600' : 'text-rose-500'}`}>
+                        {user.is_active
+                          ? <><CheckCircle size={13} strokeWidth={2.5} /> Active</>
+                          : <><XCircle  size={13} strokeWidth={2.5} /> Inactive</>
+                        }
+                      </span>
+                    </td>
+
+                    {/* Expires */}
+                    <td className="px-6 py-4">
+                      <span className={`text-xs font-bold ${isExpired(user.expiration_date) ? 'text-rose-500' : 'text-slate-400'}`}>
+                        {user.expiration_date ? formatDate(user.expiration_date) : 'Never'}
+                        {isExpired(user.expiration_date) && ' (Expired)'}
+                      </span>
+                    </td>
+
+                    {/* Created */}
+                    <td className="px-6 py-4">
+                      <span className="text-xs font-semibold text-slate-400">
+                        {formatDate(user.created_at)}
+                      </span>
+                    </td>
+
+                    {/* Actions */}
+                    <td className="px-6 py-4">
+                      <div className="flex items-center gap-1">
+                        {/* Toggle role */}
+                        <button
+                          onClick={() => toggleRole(user)}
+                          className={`p-2 rounded-xl transition-colors ${
+                            user.role === 'ADMIN'
+                              ? 'text-indigo-600 hover:bg-indigo-50'
+                              : 'text-slate-400 hover:bg-slate-100'
+                          }`}
+                          title={user.role === 'ADMIN' ? 'Demote to User' : 'Promote to Admin'}
+                        >
+                          {user.role === 'ADMIN' ? <UserX size={15} strokeWidth={2.5} /> : <UserCheck size={15} strokeWidth={2.5} />}
+                        </button>
+
+                        {/* Edit */}
+                        <button
+                          onClick={() => {
+                            setEditingUser(user);
+                            setEditForm({
+                              username:       user.username || '',
+                              role:           user.role,
+                              password:       '',
+                              expirationDate: user.expiration_date ? user.expiration_date.split('T')[0] : '',
+                              isActive:       user.is_active,
+                              permissions:    user.permissions || { ...DEFAULT_PERMISSIONS },
+                            });
+                          }}
+                          className="p-2 text-slate-400 hover:bg-slate-100 rounded-xl transition-colors"
+                          title="Edit"
+                        >
+                          <Edit2 size={15} strokeWidth={2.5} />
+                        </button>
+
+                        {/* Delete */}
+                        <button
+                          onClick={() => deleteUser(user)}
+                          className="p-2 text-slate-400 hover:bg-rose-50 hover:text-rose-600 rounded-xl transition-colors"
+                          title="Delete"
+                        >
+                          <Trash2 size={15} strokeWidth={2.5} />
+                        </button>
                       </div>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                      user.role === 'ADMIN'
-                        ? 'bg-purple-100 text-purple-800'
-                        : 'bg-green-100 text-green-800'
-                    }`}>
-                      {user.role === 'ADMIN' ? 'Admin' : 'User'}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    {new Date(user.created_at).toLocaleDateString()}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                    <div className="flex justify-end gap-2">
-                      <button
-                        onClick={() => toggleUserStatus(user.id, user.role)}
-                        className={`p-1 rounded ${
-                          user.role === 'ADMIN'
-                            ? 'text-purple-600 hover:bg-purple-50'
-                            : 'text-green-600 hover:bg-green-50'
-                        }`}
-                        title={user.role === 'ADMIN' ? 'Demote to User' : 'Promote to Admin'}
-                      >
-                        {user.role === 'ADMIN' ? <UserX size={16} /> : <UserCheck size={16} />}
-                      </button>
-                      <button
-                        onClick={() => deleteUser(user.id)}
-                        className="p-1 text-red-600 hover:bg-red-50 rounded"
-                        title="Delete User"
-                      >
-                        <Trash2 size={16} />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        {users.length === 0 && (
-          <div className="text-center py-12">
-            <Users className="mx-auto h-12 w-12 text-gray-400" />
-            <h3 className="mt-2 text-sm font-medium text-gray-900">No users</h3>
-            <p className="mt-1 text-sm text-gray-500">Get started by creating a new user.</p>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </div>
+
+      {/* ── Create Modal ─────────────────────────────────────── */}
+      {showCreateForm && (
+        <Modal title="Create New User" onClose={() => setShowCreate(false)}>
+          <form onSubmit={createUser} className="space-y-5">
+            <Field label="Email">
+              <input type="email" required autoFocus
+                value={newUser.email}
+                onChange={e => setNewUser({ ...newUser, email: e.target.value })}
+                className={inputCls} placeholder="user@example.com"
+              />
+            </Field>
+            <Field label="Username">
+              <input type="text" required
+                value={newUser.username}
+                onChange={e => setNewUser({ ...newUser, username: e.target.value })}
+                className={inputCls} placeholder="username"
+              />
+            </Field>
+            <Field label="Password">
+              <input type="password" required minLength={6}
+                value={newUser.password}
+                onChange={e => setNewUser({ ...newUser, password: e.target.value })}
+                className={inputCls} placeholder="Min. 6 characters"
+              />
+            </Field>
+            <Field label="Role">
+              <select value={newUser.role} onChange={e => setNewUser({ ...newUser, role: e.target.value })} className={inputCls}>
+                <option value="USER">User</option>
+                <option value="ADMIN">Admin</option>
+              </select>
+            </Field>
+            <Field label="Expiration Date (Optional)">
+              <input type="date"
+                value={newUser.expirationDate}
+                onChange={e => setNewUser({ ...newUser, expirationDate: e.target.value })}
+                className={inputCls}
+              />
+            </Field>
+            <PermissionsGrid
+              permissions={newUser.permissions}
+              onChange={p => setNewUser({ ...newUser, permissions: p })}
+            />
+            <ModalActions onCancel={() => setShowCreate(false)} submitLabel="Create User" loading={submitting} />
+          </form>
+        </Modal>
+      )}
+
+      {/* ── Edit Modal ───────────────────────────────────────── */}
+      {editingUser && (
+        <Modal title={`Edit — ${editingUser.username || editingUser.email}`} onClose={() => setEditingUser(null)}>
+          <form onSubmit={updateUser} className="space-y-5">
+            <Field label="Email (readonly)">
+              <input type="email" disabled value={editingUser.email} className={`${inputCls} opacity-60 cursor-not-allowed`} />
+            </Field>
+            <Field label="Username">
+              <input type="text" required
+                value={editForm.username}
+                onChange={e => setEditForm({ ...editForm, username: e.target.value })}
+                className={inputCls}
+              />
+            </Field>
+            <Field label="New Password">
+              <input type="password" minLength={6}
+                value={editForm.password}
+                onChange={e => setEditForm({ ...editForm, password: e.target.value })}
+                className={inputCls} placeholder="Leave blank to keep unchanged"
+              />
+            </Field>
+            <Field label="Role">
+              <select value={editForm.role} onChange={e => setEditForm({ ...editForm, role: e.target.value })} className={inputCls}>
+                <option value="USER">User</option>
+                <option value="ADMIN">Admin</option>
+              </select>
+            </Field>
+            <Field label="Expiration Date (Optional)">
+              <input type="date"
+                value={editForm.expirationDate}
+                onChange={e => setEditForm({ ...editForm, expirationDate: e.target.value })}
+                className={inputCls}
+              />
+            </Field>
+            <div className="flex items-center gap-3">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={editForm.isActive}
+                  onChange={e => setEditForm({ ...editForm, isActive: e.target.checked })}
+                  className="w-4 h-4 rounded accent-indigo-600"
+                />
+                <span className="text-sm font-bold text-slate-700">Active Account</span>
+              </label>
+            </div>
+            <PermissionsGrid
+              permissions={editForm.permissions}
+              onChange={p => setEditForm({ ...editForm, permissions: p })}
+            />
+            <ModalActions onCancel={() => setEditingUser(null)} submitLabel="Save Changes" loading={submitting} />
+          </form>
+        </Modal>
+      )}
     </div>
   );
 };
+
+// ─────────────────────────────────────────────
+// Sub-components
+// ─────────────────────────────────────────────
+
+const inputCls = "w-full px-4 py-3 border-2 border-slate-100 rounded-2xl text-sm font-semibold text-slate-900 bg-slate-50 focus:bg-white focus:border-indigo-400 outline-none transition-colors";
+
+const Field: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
+  <div>
+    <label className="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">{label}</label>
+    {children}
+  </div>
+);
+
+const Modal: React.FC<{ title: string; onClose: () => void; children: React.ReactNode }> = ({ title, onClose, children }) => (
+  <div className="fixed inset-0 z-50 flex items-center justify-center p-6">
+    <div className="absolute inset-0 bg-slate-900/10 backdrop-blur-md" onClick={onClose} />
+    <div className="relative bg-white rounded-[2.5rem] shadow-2xl w-full max-w-lg p-8 max-h-[90vh] overflow-y-auto">
+      <h3 className="text-xl font-black text-slate-900 mb-6">{title}</h3>
+      {children}
+    </div>
+  </div>
+);
+
+const ModalActions: React.FC<{ onCancel: () => void; submitLabel: string; loading: boolean }> = ({ onCancel, submitLabel, loading }) => (
+  <div className="flex gap-3 pt-2">
+    <button type="button" onClick={onCancel}
+      className="flex-1 py-3.5 bg-slate-100 text-slate-600 font-black uppercase tracking-widest text-xs rounded-2xl hover:bg-slate-200 transition-colors">
+      Cancel
+    </button>
+    <button type="submit" disabled={loading}
+      className="flex-1 py-3.5 bg-slate-900 text-white font-black uppercase tracking-widest text-xs rounded-2xl hover:bg-indigo-950 transition-all shadow-xl shadow-slate-200 disabled:opacity-50">
+      {loading ? (
+        <span className="flex items-center justify-center gap-2">
+          <span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+          Saving...
+        </span>
+      ) : submitLabel}
+    </button>
+  </div>
+);
+
+const PERMISSION_LABELS: Record<string, string> = {
+  dashboard: 'Dashboard', accounts: 'Accounts', transactions: 'Transactions',
+  obligations: 'Obligations', budgets: 'Budgets', goals: 'Goals',
+  ai: 'AI Insights', settings: 'Settings',
+};
+
+const PermissionsGrid: React.FC<{
+  permissions: Record<string, boolean>;
+  onChange: (p: Record<string, boolean>) => void;
+}> = ({ permissions, onChange }) => (
+  <div>
+    <label className="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-3">Permissions</label>
+    <div className="grid grid-cols-2 gap-2">
+      {Object.entries(PERMISSION_LABELS).map(([key, label]) => (
+        <label key={key} className="flex items-center gap-2.5 cursor-pointer p-3 rounded-xl hover:bg-slate-50 transition-colors">
+          <input
+            type="checkbox"
+            checked={permissions[key] ?? true}
+            onChange={e => onChange({ ...permissions, [key]: e.target.checked })}
+            className="w-4 h-4 rounded accent-indigo-600"
+          />
+          <span className="text-xs font-bold text-slate-700">{label}</span>
+        </label>
+      ))}
+    </div>
+  </div>
+);
 
 export default AdminUserManagement;

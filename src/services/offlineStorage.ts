@@ -1,57 +1,76 @@
-// Offline Storage Manager for Maestro PWA
-class OfflineStorage {
+export class OfflineStorage {
+  dbName: string;
+  version: number;
+  db: IDBDatabase | null;
+  initPromise: Promise<void> | null;
+
   constructor() {
     this.dbName = 'MaestroDB';
     this.version = 1;
     this.db = null;
-    this.init();
+    this.initPromise = null;
   }
 
-  async init() {
-    return new Promise((resolve, reject) => {
-      const request = indexedDB.open(this.dbName, this.version);
+  /**
+   * Safe initialization getter. We do this lazily or wait for it.
+   */
+  async getDb(): Promise<IDBDatabase> {
+    if (this.db) return this.db;
 
-      request.onerror = () => {
-        console.error('[OfflineStorage] Database error:', request.error);
-        reject(request.error);
-      };
+    if (!this.initPromise) {
+      this.initPromise = new Promise((resolve, reject) => {
+        try {
+          if (typeof window === 'undefined' || !window.indexedDB) {
+            throw new Error('IndexedDB is not supported in this environment');
+          }
 
-      request.onsuccess = () => {
-        this.db = request.result;
-        console.log('[OfflineStorage] Database opened successfully');
-        resolve(this.db);
-      };
+          const request = indexedDB.open(this.dbName, this.version);
 
-      request.onupgradeneeded = (event) => {
-        const db = event.target.result;
-        this.createObjectStores(db);
-      };
-    });
+          request.onerror = () => {
+            console.error('[OfflineStorage] Database error:', request.error);
+            reject(request.error || new Error('Failed to open database'));
+          };
+
+          request.onsuccess = () => {
+            this.db = request.result;
+            resolve();
+          };
+
+          request.onupgradeneeded = (event) => {
+            const db = (event.target as IDBOpenDBRequest).result;
+            this.createObjectStores(db);
+          };
+        } catch (err) {
+          reject(err);
+        }
+      });
+    }
+
+    await this.initPromise;
+    if (!this.db) throw new Error('Database initialized but db object is null');
+    return this.db;
   }
 
-  createObjectStores(db) {
-    // Store for pending operations when offline
+  createObjectStores(db: IDBDatabase) {
     if (!db.objectStoreNames.contains('pendingOperations')) {
       const pendingStore = db.createObjectStore('pendingOperations', { keyPath: 'id' });
       pendingStore.createIndex('type', 'type', { unique: false });
       pendingStore.createIndex('timestamp', 'timestamp', { unique: false });
     }
 
-    // Store for cached data
     if (!db.objectStoreNames.contains('cachedData')) {
       const cacheStore = db.createObjectStore('cachedData', { keyPath: 'key' });
       cacheStore.createIndex('type', 'type', { unique: false });
       cacheStore.createIndex('lastModified', 'lastModified', { unique: false });
     }
 
-    // Store for user preferences
     if (!db.objectStoreNames.contains('userPreferences')) {
       db.createObjectStore('userPreferences', { keyPath: 'userId' });
     }
   }
 
-  // Store data operation for offline sync
-  async storePendingOperation(operation) {
+  async storePendingOperation(operation: any): Promise<string> {
+    const db = await this.getDb();
     const data = {
       id: crypto.randomUUID(),
       type: operation.type,
@@ -61,48 +80,36 @@ class OfflineStorage {
     };
 
     return new Promise((resolve, reject) => {
-      const transaction = this.db.transaction(['pendingOperations'], 'readwrite');
+      const transaction = db.transaction(['pendingOperations'], 'readwrite');
       const store = transaction.objectStore('pendingOperations');
       const request = store.add(data);
 
-      request.onsuccess = () => {
-        console.log('[OfflineStorage] Operation stored:', data.id);
-        resolve(data.id);
-      };
-
-      request.onerror = () => {
-        console.error('[OfflineStorage] Failed to store operation:', request.error);
-        reject(request.error);
-      };
+      request.onsuccess = () => resolve(data.id);
+      request.onerror = () => reject(request.error);
     });
   }
 
-  // Get all pending operations
-  async getPendingOperations() {
-    return new Promise((resolve, reject) => {
-      const transaction = this.db.transaction(['pendingOperations'], 'readonly');
-      const store = transaction.objectStore('pendingOperations');
-      const request = store.getAll();
+  async getPendingOperations(): Promise<any[]> {
+    try {
+      const db = await this.getDb();
+      return new Promise((resolve, reject) => {
+        const transaction = db.transaction(['pendingOperations'], 'readonly');
+        const store = transaction.objectStore('pendingOperations');
+        const request = store.getAll();
 
-      request.onsuccess = () => {
-        if (!request.result) {
-          console.warn('[OfflineStorage] getPendingOperations: result is null');
-          resolve([]);
-        } else {
-          resolve(request.result);
-        }
-      };
-
-      request.onerror = () => {
-        reject(request.error);
-      };
-    });
+        request.onsuccess = () => resolve(request.result || []);
+        request.onerror = () => reject(request.error);
+      });
+    } catch (e) {
+      console.warn('[OfflineStorage] getPendingOperations missing fallback:', e);
+      return [];
+    }
   }
 
-  // Mark operation as synced
-  async markOperationSynced(operationId) {
+  async markOperationSynced(operationId: string): Promise<void> {
+    const db = await this.getDb();
     return new Promise((resolve, reject) => {
-      const transaction = this.db.transaction(['pendingOperations'], 'readwrite');
+      const transaction = db.transaction(['pendingOperations'], 'readwrite');
       const store = transaction.objectStore('pendingOperations');
       const request = store.get(operationId);
 
@@ -122,86 +129,81 @@ class OfflineStorage {
     });
   }
 
-  // Remove synced operations
-  async cleanupSyncedOperations() {
-    return new Promise((resolve, reject) => {
-      const transaction = this.db.transaction(['pendingOperations'], 'readwrite');
-      const store = transaction.objectStore('pendingOperations');
-      const index = store.index('timestamp');
+  async cleanupSyncedOperations(): Promise<void> {
+    try {
+      const db = await this.getDb();
+      return new Promise((resolve, reject) => {
+        const transaction = db.transaction(['pendingOperations'], 'readwrite');
+        const store = transaction.objectStore('pendingOperations');
+        const index = store.index('timestamp');
 
-      // Remove operations older than 30 days that are synced
-      const range = IDBKeyRange.upperBound(Date.now() - (30 * 24 * 60 * 60 * 1000));
-      const request = index.openCursor(range);
+        const range = IDBKeyRange.upperBound(Date.now() - (30 * 24 * 60 * 60 * 1000));
+        const request = index.openCursor(range);
 
-      request.onsuccess = (event) => {
-        const cursor = event.target.result;
-        if (cursor) {
-          const operation = cursor.value;
-          if (operation.synced) {
-            cursor.delete();
+        request.onsuccess = (event) => {
+          const cursor = (event.target as IDBRequest).result;
+          if (cursor) {
+            if (cursor.value.synced) cursor.delete();
+            cursor.continue();
+          } else {
+            resolve();
           }
-          cursor.continue();
-        } else {
-          resolve();
-        }
-      };
+        };
 
-      request.onerror = () => reject(request.error);
-    });
+        request.onerror = () => reject(request.error);
+      });
+    } catch {
+      // ignore
+    }
   }
 
-  // Cache data locally
-  async cacheData(key, data, type = 'general') {
-    const cacheEntry = {
-      key,
-      data: JSON.parse(JSON.stringify(data)), // Deep clone to avoid DataCloneError
-      type,
-      lastModified: Date.now(),
-      version: 1
-    };
-
-    return new Promise((resolve, reject) => {
-      const transaction = this.db.transaction(['cachedData'], 'readwrite');
-      const store = transaction.objectStore('cachedData');
-      const request = store.put(cacheEntry);
-
-      request.onsuccess = () => {
-        console.log('[OfflineStorage] Data cached:', key);
-        resolve();
+  async cacheData(key: string, data: any, type = 'general'): Promise<void> {
+    try {
+      const db = await this.getDb();
+      const cacheEntry = {
+        key,
+        data: JSON.parse(JSON.stringify(data)),
+        type,
+        lastModified: Date.now(),
+        version: 1
       };
 
-      request.onerror = () => {
-        console.error('[OfflineStorage] Failed to cache data:', request.error);
-        reject(request.error);
-      };
-    });
+      return new Promise((resolve, reject) => {
+        const transaction = db.transaction(['cachedData'], 'readwrite');
+        const store = transaction.objectStore('cachedData');
+        const request = store.put(cacheEntry);
+
+        request.onsuccess = () => resolve();
+        request.onerror = () => reject(request.error);
+      });
+    } catch (e) {
+      console.warn('[OfflineStorage] Cache skipped:', e);
+    }
   }
 
-  // Get cached data
-  async getCachedData(key) {
-    return new Promise((resolve, reject) => {
-      const transaction = this.db.transaction(['cachedData'], 'readonly');
-      const store = transaction.objectStore('cachedData');
-      const request = store.get(key);
+  async getCachedData(key: string): Promise<any> {
+    try {
+      const db = await this.getDb();
+      return new Promise((resolve, reject) => {
+        const transaction = db.transaction(['cachedData'], 'readonly');
+        const store = transaction.objectStore('cachedData');
+        const request = store.get(key);
 
-      request.onsuccess = () => {
-        resolve(request.result ? request.result.data : null);
-      };
-
-      request.onerror = () => reject(request.error);
-    });
+        request.onsuccess = () => resolve(request.result ? request.result.data : null);
+        request.onerror = () => reject(request.error);
+      });
+    } catch (e) {
+      console.warn('[OfflineStorage] Get cache skipped:', e);
+      return null;
+    }
   }
 
-  // Store user preferences
-  async storeUserPreferences(userId, preferences) {
-    const data = {
-      userId,
-      preferences,
-      lastModified: Date.now()
-    };
+  async storeUserPreferences(userId: string, preferences: any): Promise<void> {
+    const db = await this.getDb();
+    const data = { userId, preferences, lastModified: Date.now() };
 
     return new Promise((resolve, reject) => {
-      const transaction = this.db.transaction(['userPreferences'], 'readwrite');
+      const transaction = db.transaction(['userPreferences'], 'readwrite');
       const store = transaction.objectStore('userPreferences');
       const request = store.put(data);
 
@@ -210,28 +212,29 @@ class OfflineStorage {
     });
   }
 
-  // Get user preferences
-  async getUserPreferences(userId) {
-    return new Promise((resolve, reject) => {
-      const transaction = this.db.transaction(['userPreferences'], 'readonly');
-      const store = transaction.objectStore('userPreferences');
-      const request = store.get(userId);
+  async getUserPreferences(userId: string): Promise<any> {
+    try {
+      const db = await this.getDb();
+      return new Promise((resolve, reject) => {
+        const transaction = db.transaction(['userPreferences'], 'readonly');
+        const store = transaction.objectStore('userPreferences');
+        const request = store.get(userId);
 
-      request.onsuccess = () => {
-        resolve(request.result ? request.result.preferences : null);
-      };
-
-      request.onerror = () => reject(request.error);
-    });
+        request.onsuccess = () => resolve(request.result ? request.result.preferences : null);
+        request.onerror = () => reject(request.error);
+      });
+    } catch {
+      return null;
+    }
   }
 
-  // Clear all data (for reset functionality)
-  async clearAllData() {
+  async clearAllData(): Promise<void> {
+    const db = await this.getDb();
     const stores = ['pendingOperations', 'cachedData', 'userPreferences'];
 
     for (const storeName of stores) {
-      await new Promise((resolve, reject) => {
-        const transaction = this.db.transaction([storeName], 'readwrite');
+      await new Promise<void>((resolve, reject) => {
+        const transaction = db.transaction([storeName], 'readwrite');
         const store = transaction.objectStore(storeName);
         const request = store.clear();
 
@@ -239,10 +242,7 @@ class OfflineStorage {
         request.onerror = () => reject(request.error);
       });
     }
-
-    console.log('[OfflineStorage] All data cleared');
   }
 }
 
-// Export singleton instance
 export const offlineStorage = new OfflineStorage();

@@ -16,6 +16,7 @@ import {
   FinanceNotification
 } from './types';
 import { storageService } from './services/storageService';
+import { authService } from './src/services/authService';
 import { NAV_ITEMS, DEFAULT_EXPENSE_CATEGORIES, DEFAULT_INCOME_CATEGORIES } from './constants';
 import Dashboard from './components/Dashboard';
 import Accounts from './components/Accounts';
@@ -23,11 +24,11 @@ import Transactions from './components/Transactions';
 import Obligations from './components/Obligations';
 import Budgets from './components/Budgets';
 import Goals from './components/Goals';
+import Login from './components/LoginSaaS';
 import AIInsights from './components/AIInsights';
 import SettingsView from './components/SettingsView';
 import UserManagement from './components/UserManagement';
 import AdminUserManagement from './components/AdminUserManagement';
-import Login from './components/LoginSaaS';
 import { Menu, X, Plus, Sparkles, LogOut, ShieldCheck, CheckCircle, AlertCircle, Info, AlertTriangle, Languages, Globe, Wifi, WifiOff } from 'lucide-react';
 import { translations } from './translations';
 
@@ -149,35 +150,59 @@ const App: React.FC = () => {
   }, [globalState, currentUser, notify, requestConfirm]);
 
   useEffect(() => {
-    const saved = storageService.load();
-    const rememberedUserId = localStorage.getItem('maestro_remembered_user_id');
-    
-    let currentState = INITIAL_STATE;
-    if (saved) {
-      if (!saved.users || saved.users.length === 0) saved.users = INITIAL_USERS;
-      currentState = saved;
-      setGlobalState(saved);
-    }
-    
-    if (rememberedUserId) {
-      const user = currentState.users.find(u => u.id === rememberedUserId);
-      if (user) {
-        const isExpired = user.expirationDate && new Date(user.expirationDate) < new Date();
-        if (!isExpired) {
-          handleLogin(user);
-        } else {
-          localStorage.removeItem('maestro_remembered_user_id');
+    const initData = async () => {
+      // ── Restore session from JWT token ───────────────────
+      try {
+        const { data: { user: authUser } } = await authService.getCurrentUser();
+        if (authUser) {
+          // Map auth user to app User type
+          const appUser: User = {
+            id:             authUser.id,
+            email:          authUser.email,
+            username:       authUser.username || authUser.email.split('@')[0],
+            password:       '',
+            role:           authUser.role as any,
+            permissions:    authUser.permissions || {} as any,
+            settings:       authUser.settings    || { currency: 'EGP', language: 'en' },
+            expirationDate: authUser.expirationDate || authUser.expiration_date,
+          };
+
+          // Load user's cloud data
+          const saved = await storageService.load();
+          if (saved) {
+            if (!saved.users || saved.users.length === 0) saved.users = INITIAL_USERS;
+            setGlobalState(prev => ({ ...prev, ...saved }));
+          }
+
+          handleLogin(appUser);
+          setIsLoaded(true);
+          return;
+        }
+      } catch {
+        // No valid session — continue to login screen
+      }
+
+      // ── Dev bypass (only when VITE_DISABLE_LOGIN=true) ───
+      if ((import.meta as any).env.VITE_DISABLE_LOGIN === 'true') {
+        const defaultUser = INITIAL_STATE.users?.find(u => u.id === 'admin-1');
+        if (defaultUser) {
+          handleLogin(defaultUser);
         }
       }
-    } else {
-      // Auto-login as default admin user
-      const defaultUser = currentState.users.find(u => u.id === 'admin-1');
-      if (defaultUser) {
-        handleLogin(defaultUser);
-      }
-    }
-    
-    setIsLoaded(true);
+
+      setIsLoaded(true);
+    };
+
+    initData();
+
+    // ── Listen for JWT expiry from apiClient ─────────────
+    const onSessionExpired = () => {
+      setCurrentUser(null);
+      setActiveTab('dashboard');
+      notify('Session expired. Please sign in again.', 'WARNING');
+    };
+    window.addEventListener('maestro:session-expired', onSessionExpired);
+    return () => window.removeEventListener('maestro:session-expired', onSessionExpired);
   }, []);
 
   useEffect(() => {
@@ -249,9 +274,9 @@ const App: React.FC = () => {
     }
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    await authService.signOut();
     setCurrentUser(null);
-    localStorage.removeItem('maestro_remembered_user_id');
     setActiveTab('dashboard');
     notify(t.common.logout, 'INFO');
   };
@@ -345,6 +370,24 @@ const App: React.FC = () => {
       </div>
     );
   };
+
+  if (!isLoaded) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-[#fcfdfe]">
+        <div className="w-10 h-10 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
+      </div>
+    );
+  }
+
+  if (!currentUser) {
+    return (
+      <Login 
+        state={{ ...globalState, notify } as any}
+        onLogin={handleLogin}
+        updateState={updateGlobalState} 
+      />
+    );
+  }
 
   const filteredNavItems = NAV_ITEMS.filter(item => {
     if (item.adminOnly) return currentUser.role === 'ADMIN';
