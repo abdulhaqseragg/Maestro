@@ -26,10 +26,9 @@ import Budgets from './components/Budgets';
 import Goals from './components/Goals';
 import Login from './components/Login';
 import PinEntry from './components/PinEntry';
-import AIInsights from './components/AIInsights';
 import SettingsView from './components/SettingsView';
-import UserManagement from './components/UserManagement';
 import AdminUserManagement from './components/AdminUserManagement';
+import FinancialAdvisorDrawer from './components/FinancialAdvisorDrawer';
 import { Menu, X, Plus, Sparkles, LogOut, ShieldCheck, CheckCircle, AlertCircle, Info, AlertTriangle, Languages, Globe, Wifi, WifiOff, Eye, EyeOff, Cloud, CloudOff, RefreshCw } from 'lucide-react';
 import { translations } from './translations';
 
@@ -40,7 +39,6 @@ const INITIAL_PERMISSIONS: UserPermissions = {
   obligations: true,
   budgets: true,
   goals: true,
-  ai: true,
   settings: true
 };
 
@@ -101,8 +99,8 @@ const App: React.FC = () => {
   const [isLoaded, setIsLoaded] = useState(false);
   const [openAddModalOnMount, setOpenAddModalOnMount] = useState(false);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [isAdvisorOpen, setIsAdvisorOpen] = useState(false);
   const [syncStatus, setSyncStatus] = useState({ pending: 0, isSyncing: false });
-  const [isAIProcessing, setIsAIProcessing] = useState(false);
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // ── Sync Status Polling ──────────────────────────────
@@ -111,18 +109,10 @@ const App: React.FC = () => {
       const status = await storageService.getSyncStatus();
       setSyncStatus({ pending: status.pending, isSyncing: status.isSyncing });
     };
-    
-    // Listen for AI Processing events
-    const onAIStart = () => setIsAIProcessing(true);
-    const onAIEnd = () => setIsAIProcessing(false);
-    window.addEventListener('maestro:ai-start', onAIStart);
-    window.addEventListener('maestro:ai-end', onAIEnd);
 
     const interval = setInterval(checkSync, 3000);
     return () => {
       clearInterval(interval);
-      window.removeEventListener('maestro:ai-start', onAIStart);
-      window.removeEventListener('maestro:ai-end', onAIEnd);
     };
   }, []);
 
@@ -230,7 +220,7 @@ const App: React.FC = () => {
             role:           authUser.role as any,
             permissions:    authUser.permissions || {} as any,
             settings:       authUser.settings    || { currency: 'EGP', language: 'en' },
-            expirationDate: authUser.expirationDate || authUser.expiration_date,
+            expirationDate: authUser.expirationDate || (authUser as any).expiration_date,
           };
 
           handleLogin(appUser);
@@ -454,7 +444,6 @@ const App: React.FC = () => {
             case 'obligations': return <Obligations state={scopedState as any} updateState={updateScopedState} />;
             case 'budgets': return <Budgets state={scopedState as any} updateState={updateScopedState} />;
             case 'goals': return <Goals state={scopedState as any} updateState={updateScopedState} />;
-            case 'ai': return <AIInsights state={scopedState as any} />;
             case 'settings': return <SettingsView state={scopedState as any} updateState={updateScopedState} />;
             case 'user-management': return (
               <AdminUserManagement
@@ -611,22 +600,6 @@ const App: React.FC = () => {
           </nav>
 
           <div className="p-6 space-y-4">
-            <div className="bg-indigo-600 rounded-[2.5rem] p-7 text-white shadow-2xl shadow-indigo-100 relative overflow-hidden group">
-              <div className="relative z-10">
-                <div className="flex items-center gap-2 mb-3">
-                  <Sparkles size={14} className="text-indigo-200" />
-                  <span className="text-[10px] font-black uppercase tracking-metadata text-indigo-100">{t.common.aiInsight}</span>
-                </div>
-                <p className="text-xs text-indigo-50 font-semibold mb-5 leading-relaxed line-clamp-2">{t.dashboard.aiMessage}</p>
-                <button 
-                  onClick={() => currentUser.permissions.ai ? setActiveTab('ai') : null}
-                  className="w-full py-3 bg-white text-indigo-600 text-[10px] font-black uppercase tracking-metadata rounded-2xl transition-all shadow-lg btn-interaction"
-                >
-                  {t.nav.fullAnalysis}
-                </button>
-              </div>
-            </div>
-
             <button onClick={handleLogout} className="w-full flex items-center gap-3.5 px-5 py-4 text-slate-400 font-bold hover:text-rose-600 hover:bg-rose-50/50 rounded-[1.5rem] transition-all btn-interaction">
               <LogOut size={18} strokeWidth={2.5} />
               {t.common.logout}
@@ -666,14 +639,6 @@ const App: React.FC = () => {
             >
               {currentUser?.settings?.isPrivacyMode ? <EyeOff size={20} strokeWidth={2.5} /> : <Eye size={20} strokeWidth={2.5} />}
             </button>
-
-            {/* AI Background Indicator */}
-            {isAIProcessing && (
-              <div className="flex items-center gap-2 px-4 py-2 rounded-2xl bg-indigo-600 text-white shadow-lg shadow-indigo-200 animate-in fade-in zoom-in duration-300">
-                <Sparkles size={16} className="animate-pulse" />
-                <span className="text-[10px] font-black uppercase tracking-widest hidden sm:block">AI Analyzing</span>
-              </div>
-            )}
 
             {/* Sync Indicator */}
             <div 
@@ -719,7 +684,7 @@ const App: React.FC = () => {
         </div>
         
         {/* Bottom Navigation (Mobile Only) */}
-        <nav className="lg:hidden fixed bottom-0 left-0 right-0 bg-white/80 backdrop-blur-xl border-t border-slate-100 px-2 py-3 flex items-center justify-around z-50 safe-area-bottom">
+        <nav className="lg:hidden fixed bottom-6 left-6 right-6 bg-white/85 backdrop-blur-2xl border border-white shadow-[0_20px_40px_-15px_rgba(49,46,129,0.15)] ring-1 ring-slate-900/5 px-2 py-3 flex items-center justify-around z-50 rounded-[2rem]">
           {bottomNavItems.map(item => (
             <button
               key={item.id}
@@ -729,27 +694,43 @@ const App: React.FC = () => {
                 // Haptic feedback simulation
                 if ('vibrate' in navigator) navigator.vibrate(5);
               }}
-              className={`flex flex-col items-center gap-1 p-2 rounded-2xl transition-all duration-300 min-w-[64px] relative
-                ${activeTab === item.id ? 'text-indigo-600 scale-110' : 'text-slate-400'}`}
+              className={`flex flex-col items-center gap-1.5 p-2 rounded-2xl transition-all duration-500 min-w-[64px] relative
+                ${activeTab === item.id ? 'text-indigo-600 scale-105' : 'text-slate-400 hover:text-slate-600'}`}
             >
-              <div className={`p-2 rounded-xl transition-all duration-300 ${activeTab === item.id ? 'bg-indigo-50 shadow-sm' : ''}`}>
+              <div className={`p-2.5 rounded-xl transition-all duration-500 relative ${activeTab === item.id ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-200 -translate-y-2' : ''}`}>
                 {React.cloneElement(item.icon as React.ReactElement, { 
                   size: 20, 
                   strokeWidth: activeTab === item.id ? 2.5 : 2,
                 })}
               </div>
-              <span className="text-[9px] font-black uppercase tracking-widest">{t.nav[item.id]}</span>
-              {activeTab === item.id && (
-                <div className="absolute -top-1 w-1 h-1 bg-indigo-600 rounded-full animate-pulse" />
-              )}
+              <span className={`text-[9px] font-black uppercase tracking-widest transition-all duration-300 ${activeTab === item.id ? 'opacity-100 translate-y-0' : 'opacity-70'}`}>{t.nav[item.id]}</span>
             </button>
           ))}
         </nav>
         
         {currentUser.permissions.transactions && (
-          <button className="md:hidden fixed bottom-24 right-6 w-14 h-14 bg-slate-900 text-white rounded-2xl shadow-2xl flex items-center justify-center z-40 btn-interaction ring-8 ring-slate-900/10 active:scale-90" onClick={handleQuickAddTransaction}>
+          <button className={`md:hidden fixed bottom-24 ${isRTL ? 'right-6' : 'right-6'} w-14 h-14 bg-slate-900 text-white rounded-2xl shadow-2xl flex items-center justify-center z-40 btn-interaction ring-8 ring-slate-900/10 active:scale-90`} onClick={handleQuickAddTransaction}>
             <Plus size={24} strokeWidth={3} />
           </button>
+        )}
+
+        {/* AI Advisor FAB */}
+        {scopedState && (
+          <>
+            <button 
+              onClick={() => setIsAdvisorOpen(true)}
+              className={`fixed z-[45] w-14 h-14 bg-gradient-to-br from-indigo-600 to-purple-600 text-white rounded-full shadow-2xl shadow-indigo-500/30 flex items-center justify-center btn-interaction ring-4 ring-indigo-50 hover:scale-110 transition-all ${isRTL ? 'left-6 md:left-8' : 'left-6 md:right-8'} bottom-24 md:bottom-8`}
+              title={isRTL ? 'المستشار المالي' : 'Financial Advisor'}
+            >
+              <Sparkles size={24} className="animate-pulse" />
+            </button>
+
+            <FinancialAdvisorDrawer 
+              isOpen={isAdvisorOpen} 
+              onClose={() => setIsAdvisorOpen(false)} 
+              state={scopedState} 
+            />
+          </>
         )}
       </main>
     </div>

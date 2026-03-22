@@ -9,6 +9,7 @@ describe('FinanceLogic', () => {
     type: AccountType.BANK,
     balance: 1000,
     openingBalance: 1000,
+    color: '#000000',
     userId: 'user-1'
   };
 

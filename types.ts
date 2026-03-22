@@ -114,7 +114,6 @@ export interface UserPermissions {
   obligations: boolean;
   budgets: boolean;
   goals: boolean;
-  ai: boolean;
   settings: boolean;
 }
 

@@ -37,8 +37,7 @@ const mockState: FinanceState = {
   receivables: [],
   goals: [],
   categories: [],
-  globalSettings: { currency: 'EGP', language: 'ar' },
-  syncQueue: []
+  globalSettings: { language: 'ar' }
 };
 
 describe('AuthService', () => {

@@ -21,7 +21,8 @@ export class OfflineStorage {
       this.initPromise = new Promise((resolve, reject) => {
         try {
           if (typeof window === 'undefined' || !window.indexedDB) {
-            throw new Error('IndexedDB is not supported in this environment');
+            reject(new Error('IndexedDB is not supported in this environment'));
+            return;
           }
 
           const request = indexedDB.open(this.dbName, this.version);
@@ -38,7 +39,7 @@ export class OfflineStorage {
 
           request.onupgradeneeded = (event) => {
             const db = (event.target as IDBOpenDBRequest).result;
-            this.createObjectStores(db);
+            if (db) this.createObjectStores(db);
           };
         } catch (err) {
           reject(err);
@@ -46,12 +47,23 @@ export class OfflineStorage {
       });
     }
 
-    await this.initPromise;
-    if (!this.db) throw new Error('Database initialized but db object is null');
+    try {
+      await this.initPromise;
+    } catch (e) {
+      // Intentionally swallow to let db be returned as null if we want to fail gracefully
+    }
+    
+    if (!this.db) {
+      // Just returning a dummy object or throwing?
+      // Since some callers don't catch, let's gracefully return null here? No, caller expects promise of IDBDatabase.
+      // Let's actually throw here, BUT inside methods we catch or expect null if we use .catch(() => null)
+      throw new Error('Database initialized but db object is null');
+    }
     return this.db;
   }
 
   createObjectStores(db: IDBDatabase) {
+    if (!db) return;
     if (!db.objectStoreNames.contains('pendingOperations')) {
       const pendingStore = db.createObjectStore('pendingOperations', { keyPath: 'id' });
       pendingStore.createIndex('type', 'type', { unique: false });
@@ -70,7 +82,8 @@ export class OfflineStorage {
   }
 
   async storePendingOperation(operation: any): Promise<string> {
-    const db = await this.getDb();
+    const db = await this.getDb().catch(() => null);
+    
     const data = {
       id: crypto.randomUUID(),
       type: operation.type,
@@ -79,26 +92,38 @@ export class OfflineStorage {
       synced: false
     };
 
-    return new Promise((resolve, reject) => {
-      const transaction = db.transaction(['pendingOperations'], 'readwrite');
-      const store = transaction.objectStore('pendingOperations');
-      const request = store.add(data);
+    if (!db) return data.id;
 
-      request.onsuccess = () => resolve(data.id);
-      request.onerror = () => reject(request.error);
+    return new Promise((resolve, reject) => {
+      try {
+        const transaction = db.transaction(['pendingOperations'], 'readwrite');
+        const store = transaction.objectStore('pendingOperations');
+        const request = store.add(data);
+
+        request.onsuccess = () => resolve(data.id);
+        request.onerror = () => reject(request.error);
+      } catch (e) {
+        reject(e);
+      }
     });
   }
 
   async getPendingOperations(): Promise<any[]> {
     try {
-      const db = await this.getDb();
+      const db = await this.getDb().catch(() => null);
+      if (!db) return [];
+      
       return new Promise((resolve, reject) => {
-        const transaction = db.transaction(['pendingOperations'], 'readonly');
-        const store = transaction.objectStore('pendingOperations');
-        const request = store.getAll();
+        try {
+          const transaction = db.transaction(['pendingOperations'], 'readonly');
+          const store = transaction.objectStore('pendingOperations');
+          const request = store.getAll();
 
-        request.onsuccess = () => resolve(request.result || []);
-        request.onerror = () => reject(request.error);
+          request.onsuccess = () => resolve(request.result || []);
+          request.onerror = () => reject(request.error);
+        } catch (e) {
+          reject(e);
+        }
       });
     } catch (e) {
       console.warn('[OfflineStorage] getPendingOperations missing fallback:', e);
@@ -107,50 +132,62 @@ export class OfflineStorage {
   }
 
   async markOperationSynced(operationId: string): Promise<void> {
-    const db = await this.getDb();
+    const db = await this.getDb().catch(() => null);
+    if (!db) return;
+    
     return new Promise((resolve, reject) => {
-      const transaction = db.transaction(['pendingOperations'], 'readwrite');
-      const store = transaction.objectStore('pendingOperations');
-      const request = store.get(operationId);
-
-      request.onsuccess = () => {
-        const operation = request.result;
-        if (operation) {
-          operation.synced = true;
-          const updateRequest = store.put(operation);
-          updateRequest.onsuccess = () => resolve();
-          updateRequest.onerror = () => reject(updateRequest.error);
-        } else {
-          resolve();
-        }
-      };
-
-      request.onerror = () => reject(request.error);
-    });
-  }
-
-  async cleanupSyncedOperations(): Promise<void> {
-    try {
-      const db = await this.getDb();
-      return new Promise((resolve, reject) => {
+      try {
         const transaction = db.transaction(['pendingOperations'], 'readwrite');
         const store = transaction.objectStore('pendingOperations');
-        const index = store.index('timestamp');
+        const request = store.get(operationId);
 
-        const range = IDBKeyRange.upperBound(Date.now() - (30 * 24 * 60 * 60 * 1000));
-        const request = index.openCursor(range);
-
-        request.onsuccess = (event) => {
-          const cursor = (event.target as IDBRequest).result;
-          if (cursor) {
-            if (cursor.value.synced) cursor.delete();
-            cursor.continue();
+        request.onsuccess = () => {
+          const operation = request.result;
+          if (operation) {
+            operation.synced = true;
+            const updateRequest = store.put(operation);
+            updateRequest.onsuccess = () => resolve();
+            updateRequest.onerror = () => reject(updateRequest.error);
           } else {
             resolve();
           }
         };
 
         request.onerror = () => reject(request.error);
+      } catch (err) {
+        reject(err);
+      }
+    });
+  }
+
+  async cleanupSyncedOperations(): Promise<void> {
+    try {
+      const db = await this.getDb().catch(() => null);
+      if (!db) return;
+      
+      return new Promise((resolve, reject) => {
+        try {
+          const transaction = db.transaction(['pendingOperations'], 'readwrite');
+          const store = transaction.objectStore('pendingOperations');
+          const index = store.index('timestamp');
+
+          const range = IDBKeyRange.upperBound(Date.now() - (30 * 24 * 60 * 60 * 1000));
+          const request = index.openCursor(range);
+
+          request.onsuccess = (event) => {
+            const cursor = (event.target as IDBRequest).result;
+            if (cursor) {
+              if (cursor.value.synced) cursor.delete();
+              cursor.continue();
+            } else {
+              resolve();
+            }
+          };
+
+          request.onerror = () => reject(request.error);
+        } catch (e) {
+          reject(e);
+        }
       });
     } catch {
       // ignore
@@ -159,7 +196,9 @@ export class OfflineStorage {
 
   async cacheData(key: string, data: any, type = 'general'): Promise<void> {
     try {
-      const db = await this.getDb();
+      const db = await this.getDb().catch(() => null);
+      if (!db) return;
+      
       const cacheEntry = {
         key,
         data: JSON.parse(JSON.stringify(data)),
@@ -169,12 +208,16 @@ export class OfflineStorage {
       };
 
       return new Promise((resolve, reject) => {
-        const transaction = db.transaction(['cachedData'], 'readwrite');
-        const store = transaction.objectStore('cachedData');
-        const request = store.put(cacheEntry);
+        try {
+          const transaction = db.transaction(['cachedData'], 'readwrite');
+          const store = transaction.objectStore('cachedData');
+          const request = store.put(cacheEntry);
 
-        request.onsuccess = () => resolve();
-        request.onerror = () => reject(request.error);
+          request.onsuccess = () => resolve();
+          request.onerror = () => reject(request.error);
+        } catch (e) {
+          reject(e);
+        }
       });
     } catch (e) {
       console.warn('[OfflineStorage] Cache skipped:', e);
@@ -183,14 +226,20 @@ export class OfflineStorage {
 
   async getCachedData(key: string): Promise<any> {
     try {
-      const db = await this.getDb();
+      const db = await this.getDb().catch(() => null);
+      if (!db) return null;
+      
       return new Promise((resolve, reject) => {
-        const transaction = db.transaction(['cachedData'], 'readonly');
-        const store = transaction.objectStore('cachedData');
-        const request = store.get(key);
+        try {
+          const transaction = db.transaction(['cachedData'], 'readonly');
+          const store = transaction.objectStore('cachedData');
+          const request = store.get(key);
 
-        request.onsuccess = () => resolve(request.result ? request.result.data : null);
-        request.onerror = () => reject(request.error);
+          request.onsuccess = () => resolve(request.result ? request.result.data : null);
+          request.onerror = () => reject(request.error);
+        } catch (e) {
+          reject(e);
+        }
       });
     } catch (e) {
       console.warn('[OfflineStorage] Get cache skipped:', e);
@@ -199,29 +248,41 @@ export class OfflineStorage {
   }
 
   async storeUserPreferences(userId: string, preferences: any): Promise<void> {
-    const db = await this.getDb();
+    const db = await this.getDb().catch(() => null);
+    if (!db) return;
+    
     const data = { userId, preferences, lastModified: Date.now() };
 
     return new Promise((resolve, reject) => {
-      const transaction = db.transaction(['userPreferences'], 'readwrite');
-      const store = transaction.objectStore('userPreferences');
-      const request = store.put(data);
+      try {
+        const transaction = db.transaction(['userPreferences'], 'readwrite');
+        const store = transaction.objectStore('userPreferences');
+        const request = store.put(data);
 
-      request.onsuccess = () => resolve();
-      request.onerror = () => reject(request.error);
+        request.onsuccess = () => resolve();
+        request.onerror = () => reject(request.error);
+      } catch (err) {
+        reject(err);
+      }
     });
   }
 
   async getUserPreferences(userId: string): Promise<any> {
     try {
-      const db = await this.getDb();
+      const db = await this.getDb().catch(() => null);
+      if (!db) return null;
+      
       return new Promise((resolve, reject) => {
-        const transaction = db.transaction(['userPreferences'], 'readonly');
-        const store = transaction.objectStore('userPreferences');
-        const request = store.get(userId);
+        try {
+          const transaction = db.transaction(['userPreferences'], 'readonly');
+          const store = transaction.objectStore('userPreferences');
+          const request = store.get(userId);
 
-        request.onsuccess = () => resolve(request.result ? request.result.preferences : null);
-        request.onerror = () => reject(request.error);
+          request.onsuccess = () => resolve(request.result ? request.result.preferences : null);
+          request.onerror = () => reject(request.error);
+        } catch(err) {
+          reject(err);
+        }
       });
     } catch {
       return null;
@@ -229,17 +290,23 @@ export class OfflineStorage {
   }
 
   async clearAllData(): Promise<void> {
-    const db = await this.getDb();
+    const db = await this.getDb().catch(() => null);
+    if (!db) return;
+    
     const stores = ['pendingOperations', 'cachedData', 'userPreferences'];
 
     for (const storeName of stores) {
       await new Promise<void>((resolve, reject) => {
-        const transaction = db.transaction([storeName], 'readwrite');
-        const store = transaction.objectStore(storeName);
-        const request = store.clear();
+        try {
+          const transaction = db.transaction([storeName], 'readwrite');
+          const store = transaction.objectStore(storeName);
+          const request = store.clear();
 
-        request.onsuccess = () => resolve();
-        request.onerror = () => reject(request.error);
+          request.onsuccess = () => resolve();
+          request.onerror = () => reject(request.error);
+        } catch(err) {
+          reject(err);
+        }
       });
     }
   }

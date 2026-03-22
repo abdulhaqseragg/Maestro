@@ -28,14 +28,6 @@ const SettingsView: React.FC<SettingsViewProps> = ({ state, updateState }) => {
   const [isPinModalOpen, setIsPinModalOpen] = useState(false);
   const [pinData, setPinData] = useState({ pin: '', confirm: '' });
 
-  // API Key State
-  const [geminiKey, setGeminiKey] = useState(localStorage.getItem('maestro_user_gemini_key') || '');
-
-  const saveGeminiKey = () => {
-    localStorage.setItem('maestro_user_gemini_key', geminiKey);
-    state.notify(lang === 'ar' ? 'تم حفظ مفتاح API بنجاح' : 'API Key saved successfully', 'SUCCESS');
-  };
-
   const handleGenerateDemoData = async () => {
     const { data: { user } } = await authService.getCurrentUser();
     if (!user) return;
@@ -312,37 +304,6 @@ const SettingsView: React.FC<SettingsViewProps> = ({ state, updateState }) => {
               <option value="USD">{t.settings.currencies.USD}</option>
               <option value="EUR">{t.settings.currencies.EUR}</option>
             </select>
-          </div>
-
-          {/* AI Configuration */}
-          <div className="pt-6 border-t border-slate-50 space-y-4">
-            <div className="flex items-center gap-3 mb-2">
-              <div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl"><Database size={18} /></div>
-              <p className="text-sm font-bold text-slate-800">{lang === 'ar' ? 'إعدادات الذكاء الاصطناعي' : 'AI Configuration'}</p>
-            </div>
-            <div className="space-y-3">
-              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-1">Gemini API Key</label>
-              <div className="flex gap-2">
-                <input 
-                  type="password"
-                  value={geminiKey}
-                  onChange={e => setGeminiKey(e.target.value)}
-                  placeholder="Enter your Gemini API key..."
-                  className="flex-1 px-4 py-2.5 bg-slate-50 border border-slate-100 rounded-xl text-xs focus:ring-4 focus:ring-slate-100 outline-none transition-all"
-                />
-                <button 
-                  onClick={saveGeminiKey}
-                  className="px-4 py-2.5 bg-slate-900 text-white text-[10px] font-bold uppercase rounded-xl hover:bg-black transition-all"
-                >
-                  {t.common.save}
-                </button>
-              </div>
-              <p className="text-[9px] text-slate-400 leading-relaxed px-1">
-                {lang === 'ar' 
-                  ? 'تحتاج إلى مفتاح Gemini API لتفعيل التحليلات المالية الذكية. يمكنك الحصول عليه مجاناً من Google AI Studio.' 
-                  : 'A Gemini API key is required for smart financial insights. You can get one for free from Google AI Studio.'}
-              </p>
-            </div>
           </div>
         </div>
       </section>

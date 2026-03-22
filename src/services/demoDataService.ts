@@ -5,7 +5,7 @@ export const generateDemoData = (currentUser: User): Partial<FinanceState> => {
   const now = new Date();
   
   // 1. Accounts
-  const accounts = [
+  const accounts: FinanceState['accounts'] = [
     {
       id: crypto.randomUUID(),
       name: 'Main Bank Account',
@@ -42,18 +42,18 @@ export const generateDemoData = (currentUser: User): Partial<FinanceState> => {
   ];
 
   // 2. Categories (Simplified mapping for demo)
-  const categories = [
-    { id: 'cat-1', name: 'Salary', type: TransactionType.INCOME },
-    { id: 'cat-2', name: 'Freelance', type: TransactionType.INCOME },
-    { id: 'cat-3', name: 'Rent', type: TransactionType.EXPENSE },
-    { id: 'cat-4', name: 'Groceries', type: TransactionType.EXPENSE },
-    { id: 'cat-5', name: 'Dining', type: TransactionType.EXPENSE },
-    { id: 'cat-6', name: 'Subscription', type: TransactionType.EXPENSE },
-    { id: 'cat-7', name: 'Shopping', type: TransactionType.EXPENSE }
+  const categories: FinanceState['categories'] = [
+    { id: crypto.randomUUID(), name: 'Salary', type: TransactionType.INCOME, subCategories: [], userId },
+    { id: crypto.randomUUID(), name: 'Freelance', type: TransactionType.INCOME, subCategories: [], userId },
+    { id: crypto.randomUUID(), name: 'Rent', type: TransactionType.EXPENSE, subCategories: [], userId },
+    { id: crypto.randomUUID(), name: 'Groceries', type: TransactionType.EXPENSE, subCategories: [], userId },
+    { id: crypto.randomUUID(), name: 'Dining', type: TransactionType.EXPENSE, subCategories: [], userId },
+    { id: crypto.randomUUID(), name: 'Subscription', type: TransactionType.EXPENSE, subCategories: [], userId },
+    { id: crypto.randomUUID(), name: 'Shopping', type: TransactionType.EXPENSE, subCategories: [], userId }
   ];
 
   // 3. Transactions
-  const transactions = [
+  const transactions: FinanceState['transactions'] = [
     {
       id: crypto.randomUUID(),
       type: TransactionType.INCOME,
@@ -127,7 +127,7 @@ export const generateDemoData = (currentUser: User): Partial<FinanceState> => {
   ];
 
   // 4. Budgets
-  const budgets = [
+  const budgets: FinanceState['budgets'] = [
     {
       id: crypto.randomUUID(),
       category: 'Groceries',
@@ -147,7 +147,7 @@ export const generateDemoData = (currentUser: User): Partial<FinanceState> => {
   ];
 
   // 5. Obligations
-  const payables = [
+  const payables: FinanceState['payables'] = [
     {
       id: crypto.randomUUID(),
       title: 'Car Loan',
@@ -165,7 +165,7 @@ export const generateDemoData = (currentUser: User): Partial<FinanceState> => {
     }
   ];
 
-  const receivables = [
+  const receivables: FinanceState['receivables'] = [
     {
       id: crypto.randomUUID(),
       debtor: 'John Doe',
@@ -178,7 +178,7 @@ export const generateDemoData = (currentUser: User): Partial<FinanceState> => {
   ];
 
   // 6. Goals
-  const goals = [
+  const goals: FinanceState['goals'] = [
     {
       id: crypto.randomUUID(),
       name: 'Summer Vacation 2026',
@@ -193,6 +193,7 @@ export const generateDemoData = (currentUser: User): Partial<FinanceState> => {
 
   return {
     accounts,
+    categories,
     transactions,
     budgets,
     payables,

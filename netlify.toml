@@ -5,6 +5,13 @@
 [build.environment]
   NODE_VERSION = "18"
 
+# Proxy Gemini REST API (same-origin) — must be before SPA fallback
+[[redirects]]
+  from = "/gemini-api/*"
+  to = "https://generativelanguage.googleapis.com/:splat"
+  status = 200
+  force = true
+
 [[redirects]]
   from = "/*"
   to = "/index.html"

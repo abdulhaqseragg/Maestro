@@ -19,6 +19,26 @@ export default defineConfig(({ mode }) => {
           changeOrigin: true,
           secure: false,
         },
+        // Same-origin proxy: avoids browser CORS when calling Gemini from the client
+        '/gemini-api': {
+          target: 'https://generativelanguage.googleapis.com',
+          changeOrigin: true,
+          secure: true,
+          rewrite: (path) => path.replace(/^\/gemini-api/, ''),
+        },
+      },
+    },
+
+    preview: {
+      port: 4173,
+      host: '0.0.0.0',
+      proxy: {
+        '/gemini-api': {
+          target: 'https://generativelanguage.googleapis.com',
+          changeOrigin: true,
+          secure: true,
+          rewrite: (path) => path.replace(/^\/gemini-api/, ''),
+        },
       },
     },
 

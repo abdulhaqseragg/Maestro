@@ -4,7 +4,7 @@
  * Stores local session and manages users in the local finance state.
  */
 import apiClient, { setToken, clearToken, getToken } from './apiClient';
-import { User, FinanceState, UserPermissions } from '../../types';
+import { User, FinanceState } from '../../types';
 
 export interface AuthUser extends User {}
 
@@ -12,6 +12,20 @@ class AuthService {
   private _currentUser: AuthUser | null = null;
   private readonly SESSION_KEY = 'maestro_local_session';
   private readonly STORAGE_KEY = 'maestro_finance_data';
+
+  private createEmptyFinanceState(): FinanceState {
+    return {
+      users: [],
+      accounts: [],
+      transactions: [],
+      payables: [],
+      receivables: [],
+      budgets: [],
+      goals: [],
+      categories: [],
+      globalSettings: { language: 'en' }
+    };
+  }
 
   private getFinanceData(): FinanceState | null {
     const raw = localStorage.getItem(this.STORAGE_KEY);
@@ -75,7 +89,7 @@ class AuthService {
           localStorage.setItem(this.SESSION_KEY, JSON.stringify(response.user));
           
           // Add to local database too for offline access
-          const data = this.getFinanceData() || { users: [], accounts: [], transactions: [], budgets: [], payables: [], receivables: [], goals: [], syncQueue: [], globalSettings: { language: 'en', currency: 'USD' } };
+          const data = this.getFinanceData() || this.createEmptyFinanceState();
           data.users.push(response.user);
           this.saveFinanceData(data);
           
@@ -87,7 +101,7 @@ class AuthService {
     }
 
     // 2. Fallback to Local Sign Up
-    const data = this.getFinanceData() || { users: [], accounts: [], transactions: [], budgets: [], payables: [], receivables: [], goals: [], syncQueue: [], globalSettings: { language: 'en', currency: 'USD' } };
+    const data = this.getFinanceData() || this.createEmptyFinanceState();
     const currentUsers = data?.users || [];
 
     if (currentUsers.some(u => u.email === email)) {
@@ -102,7 +116,7 @@ class AuthService {
       role: 'USER',
       permissions: {
         dashboard: true, accounts: true, transactions: true,
-        obligations: true, budgets: true, goals: true, ai: true, settings: true
+        obligations: true, budgets: true, goals: true, settings: true
       },
       settings: { language: 'en', currency: 'USD' }
     };

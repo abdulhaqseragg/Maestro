@@ -8,7 +8,6 @@ import {
   ChartPie, 
   Target, 
   Settings,
-  BrainCircuit,
   Users
 } from 'lucide-react';
 
@@ -27,7 +26,6 @@ export const NAV_ITEMS = [
   { id: 'obligations', label: 'Obligations', icon: <Receipt size={20} /> },
   { id: 'budgets', label: 'Budgets', icon: <ChartPie size={20} /> },
   { id: 'goals', label: 'Goals', icon: <Target size={20} /> },
-  { id: 'ai', label: 'AI Insights', icon: <BrainCircuit size={20} /> },
   { id: 'settings', label: 'Settings', icon: <Settings size={20} /> },
   { id: 'user-management', label: 'Users', icon: <Users size={20} />, adminOnly: true }
 ];
